@@ -12,9 +12,7 @@
 int main(void) {
     debug_init_emulog();
 
-#ifdef USE_JOYPAD
     joypad_init();
-#endif
 
     display_init(RESOLUTION_320x240, DEPTH_16_BPP, 3, GAMMA_NONE,
                  FILTERS_RESAMPLE_ANTIALIAS_DEDITHER);
@@ -62,6 +60,8 @@ int main(void) {
                                         1,
                                     });
 
+    data_cache_writeback_invalidate_all();
+
     fm_mat4_t mat_projection;
     mg_mat4_perspective(&mat_projection, FM_DEG2RAD(100),
                         (float)display_get_width() / display_get_height(),
@@ -70,10 +70,8 @@ int main(void) {
     while (true) {
         surface_t *surf = display_get();
         uint64_t t = get_ticks_ms();
-#ifdef USE_JOYPAD
         joypad_poll();
         joypad_buttons_t buttons_cur = joypad_get_buttons(JOYPAD_PORT_1);
-#endif
 
         fm_vec3_t eye;
         fm_sincosf(t * 2 * FM_PI / 5000, &eye.x, &eye.y);
@@ -99,6 +97,7 @@ int main(void) {
                                             mat_view_model.m[0],
                                             mat_normal.m[0],
                                         });
+        data_cache_hit_writeback(&ud_matrices, sizeof(ud_matrices));
 
         rdpq_attach(surf, display_get_zbuf());
 
@@ -115,11 +114,10 @@ int main(void) {
         rdpq_mode_dithering(DITHER_SQUARE_SQUARE);
         rdpq_mode_antialias(AA_STANDARD);
         rdpq_mode_combiner(RDPQ_COMBINER1((PRIM, 0, SHADE, 0), (0, 0, 0, 1)));
-#ifdef USE_JOYPAD
         if (buttons_cur.a) {
-            rdpq_mode_zbuf(false, true);
+            debugf("Z\n");
+            rdpq_mode_zbuf(true, true);
         }
-#endif
         rdpq_mode_end();
 
         rdpq_set_prim_color((color_t){255, 100, 100, 255});
@@ -137,9 +135,8 @@ int main(void) {
 
         mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_BACK});
 
-        mg_set_geometry_flags(MG_GEOMETRY_FLAGS_SHADE_ENABLED
-                              // | MG_GEOMETRY_FLAGS_Z_ENABLED
-        );
+        mg_set_geometry_flags(MG_GEOMETRY_FLAGS_SHADE_ENABLED |
+                              MG_GEOMETRY_FLAGS_Z_ENABLED);
 
         mg_uniform_load(u_fog, &ud_fog);
         mg_uniform_load(u_lighting, &ud_lighting);
