@@ -1,0 +1,10 @@
+build
+*.z64
+
+.venv
+
+.cache
+.clangd
+compile_commands.json
+
+.vscode
