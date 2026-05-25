@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Dragorn421
 // SPDX-License-Identifier: CC0-1.0
 
+#include <math.h>
 #include <stdint.h>
 
 #include <libdragon.h>
@@ -91,6 +92,19 @@ int main(void) {
         fm_mat4_t mat_view_model_inv, mat_normal;
         fm_mat4_inverse(&mat_view_model_inv, &mat_view_model);
         fm_mat4_transpose(&mat_normal, &mat_view_model_inv);
+        float mat_normal_max = 0.0f;
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                float f = fabsf(mat_normal.m[i][j]);
+                if (f > mat_normal_max) {
+                    mat_normal_max = f;
+                }
+            }
+        }
+        if (mat_normal_max != 0.0f) {
+            float f = 1.0f / mat_normal_max;
+            fm_mat4_scale(&mat_normal, &(fm_vec3_t){{f, f, f}});
+        }
         mgfx_matrices_t ud_matrices;
         mgfx_get_matrices(&ud_matrices, &(mgfx_matrices_parms_t){
                                             mat_projection_view_model.m[0],
