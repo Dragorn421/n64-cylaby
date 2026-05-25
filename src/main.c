@@ -65,8 +65,8 @@ int main(void) {
 
     fm_mat4_t mat_projection;
     mg_mat4_perspective(&mat_projection, FM_DEG2RAD(100),
-                        (float)display_get_width() / display_get_height(),
-                        0.001f, 10.0f);
+                        (float)display_get_width() / display_get_height(), 0.1f,
+                        10.0f);
 
     while (true) {
         surface_t *surf = display_get();
@@ -128,10 +128,7 @@ int main(void) {
         rdpq_mode_dithering(DITHER_SQUARE_SQUARE);
         rdpq_mode_antialias(AA_STANDARD);
         rdpq_mode_combiner(RDPQ_COMBINER1((PRIM, 0, SHADE, 0), (0, 0, 0, 1)));
-        if (buttons_cur.a) {
-            debugf("Z\n");
-            rdpq_mode_zbuf(true, true);
-        }
+        rdpq_mode_zbuf(true, true);
         rdpq_mode_end();
 
         rdpq_set_prim_color((color_t){255, 100, 100, 255});
