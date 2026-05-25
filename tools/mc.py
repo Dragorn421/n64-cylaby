@@ -80,9 +80,19 @@ def main():
         f.write("\n")
         f.write('#include "model.h"\n')
         f.write("\n")
-        for mesh in gltf.meshes:
-            mesh_prefix = mesh.name
-            f.write(f"// Mesh {mesh.name}\n")
+        for i_mesh, mesh in enumerate(gltf.meshes):
+            # Blender gltf export names the gltf meshes per the blender mesh datablock
+            # name and the object name (which we want to use) is used as node name
+            node_names = [
+                _n.name
+                for _n in gltf.nodes
+                if _n.mesh == i_mesh and _n.name is not None
+            ]
+            if node_names:
+                mesh_prefix = node_names[0]
+            else:
+                mesh_prefix = mesh.name
+            f.write(f"// Mesh {mesh_prefix}\n")
             primitives_symbols: list[str] = []
             for i_primitive, primitive in enumerate(mesh.primitives):
                 primitive_prefix = f"{mesh_prefix}_{i_primitive}"
@@ -136,7 +146,10 @@ def main():
                 f.write(" };\n")
 
                 f.write(f" struct primitive {primitive_prefix} = " "{\n")
-                f.write(f"  {primitive.material},\n")
+                if primitive.material is None:
+                    f.write(f"  -1,\n")
+                else:
+                    f.write(f"  {primitive.material},\n")
                 f.write(f"  {primitive_prefix}_vertices,\n")
                 f.write(f"  {primitive_prefix}_indices,\n")
                 f.write(f"  {indices.shape[0]},\n")
