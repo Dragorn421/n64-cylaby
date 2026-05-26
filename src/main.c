@@ -19,7 +19,7 @@
 #endif
 
 struct GfxCtx {
-    mgfx_matrices_t ud_mat_buf[10];
+    mgfx_matrices_t ud_mat_buf[100];
     int i_ud_mat_buf;
 };
 
@@ -162,10 +162,61 @@ int main(void) {
             tower_floors[i].horizontal_walls[j] = false;
         }
     }
-    tower_floors[0].vertical_walls[0] = true;
-    tower_floors[0].horizontal_walls[0] = true;
-    tower_floors[0].horizontal_walls[1] = true;
-    tower_floors[1].vertical_walls[2] = true;
+
+    {
+        tower_floors[0].horizontal_walls[0] = true;
+        tower_floors[0].vertical_walls[2] = true;
+        tower_floors[0].vertical_walls[3] = true;
+        tower_floors[0].vertical_walls[4] = true;
+        tower_floors[0].horizontal_walls[5] = true;
+        tower_floors[0].vertical_walls[6] = true;
+        tower_floors[0].horizontal_walls[7] = true;
+        tower_floors[0].vertical_walls[8] = true;
+        tower_floors[0].horizontal_walls[8] = true;
+        tower_floors[1].vertical_walls[0] = true;
+        tower_floors[1].horizontal_walls[0] = true;
+        tower_floors[1].horizontal_walls[1] = true;
+        tower_floors[1].horizontal_walls[2] = true;
+        tower_floors[1].vertical_walls[6] = true;
+        tower_floors[1].vertical_walls[7] = true;
+        tower_floors[1].horizontal_walls[7] = true;
+        tower_floors[1].vertical_walls[9] = true;
+        tower_floors[2].horizontal_walls[0] = true;
+        tower_floors[2].vertical_walls[1] = true;
+        tower_floors[2].vertical_walls[2] = true;
+        tower_floors[2].horizontal_walls[2] = true;
+        tower_floors[2].horizontal_walls[3] = true;
+        tower_floors[2].vertical_walls[4] = true;
+        tower_floors[2].horizontal_walls[4] = true;
+        tower_floors[2].vertical_walls[5] = true;
+        tower_floors[2].vertical_walls[6] = true;
+        tower_floors[2].horizontal_walls[7] = true;
+        tower_floors[2].vertical_walls[8] = true;
+        tower_floors[2].horizontal_walls[8] = true;
+        tower_floors[3].vertical_walls[2] = true;
+        tower_floors[3].vertical_walls[3] = true;
+        tower_floors[3].vertical_walls[5] = true;
+        tower_floors[3].horizontal_walls[6] = true;
+        tower_floors[3].vertical_walls[7] = true;
+        tower_floors[3].horizontal_walls[7] = true;
+        tower_floors[4].vertical_walls[0] = true;
+        tower_floors[4].horizontal_walls[0] = true;
+        tower_floors[4].vertical_walls[1] = true;
+        tower_floors[4].horizontal_walls[1] = true;
+        tower_floors[4].vertical_walls[2] = true;
+        tower_floors[4].horizontal_walls[2] = true;
+        tower_floors[4].horizontal_walls[3] = true;
+        tower_floors[4].vertical_walls[4] = true;
+        tower_floors[4].horizontal_walls[4] = true;
+        tower_floors[4].horizontal_walls[5] = true;
+        tower_floors[4].vertical_walls[6] = true;
+        tower_floors[4].horizontal_walls[6] = true;
+        tower_floors[4].horizontal_walls[7] = true;
+        tower_floors[4].horizontal_walls[8] = true;
+        tower_floors[4].vertical_walls[9] = true;
+        tower_floors[4].horizontal_walls[9] = true;
+    }
+
     tower_floors[1].corridor = 0;
     tower_floors[2].corridor = 1;
 
