@@ -70,6 +70,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("gltf")
     parser.add_argument("c")
+    parser.add_argument("--scale", type=float, default=1.0)
     args = parser.parse_args()
 
     gltf = GLTF2.load(args.gltf)
@@ -107,6 +108,8 @@ def main():
 
                 assert isinstance(primitive.attributes.POSITION, int)
                 positions = accessor_to_np(gltf, primitive.attributes.POSITION)
+                positions = positions.astype(float)
+                positions *= args.scale
 
                 assert isinstance(primitive.attributes.NORMAL, int)
                 normals = accessor_to_np(gltf, primitive.attributes.NORMAL)

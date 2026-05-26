@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -63,6 +64,13 @@ float my_lerp_angle(float a, float b, float t) {
     float diff = fmodf((b - a), FM_PI * 2);
     float dist = fmodf(diff * 2, FM_PI * 2) - diff;
     return a + dist * t;
+}
+
+float fm_wrapf(float x, float y) {
+    float v = fm_fmodf(x, y);
+    if (v < 0)
+        v += y;
+    return v;
 }
 
 int main(void) {
@@ -137,16 +145,27 @@ int main(void) {
     float camera_eye_height = 0.0f;
     float camera_at_height = 0.0f;
 
+#define SEGMENTS_PER_FLOOR 10
     struct {
         int n_floors;
         int segments_per_floor;
-    } tower = {5, 10};
+    } tower = {5, SEGMENTS_PER_FLOOR};
     struct {
         int corridor;
+        bool vertical_walls[SEGMENTS_PER_FLOOR];
+        bool horizontal_walls[SEGMENTS_PER_FLOOR];
     } tower_floors[tower.n_floors];
     for (int i = 0; i < tower.n_floors; i++) {
         tower_floors[i].corridor = -1;
+        for (int j = 0; j < tower.segments_per_floor; j++) {
+            tower_floors[i].vertical_walls[j] = false;
+            tower_floors[i].horizontal_walls[j] = false;
+        }
     }
+    tower_floors[0].vertical_walls[0] = true;
+    tower_floors[0].horizontal_walls[0] = true;
+    tower_floors[0].horizontal_walls[1] = true;
+    tower_floors[1].vertical_walls[2] = true;
     tower_floors[1].corridor = 0;
     tower_floors[2].corridor = 1;
 
@@ -165,6 +184,31 @@ int main(void) {
 
         suzanne_angle += inputs.stick_x / 60.0f * FM_DEG2RAD(100) * dt;
         suzanne_angle = fm_wrap_angle(suzanne_angle);
+        {
+            int segment =
+                (int)fm_roundf(suzanne_angle /
+                               (2 * FM_PI / tower.segments_per_floor)) %
+                tower.segments_per_floor;
+            int floor = (int)fm_roundf(suzanne_height);
+            if (floor >= 0 && floor < tower.n_floors) {
+                if (tower_floors[floor].vertical_walls[segment]) {
+                    float limit = (segment * 2 * FM_PI - FM_DEG2RAD(50)) /
+                                  tower.segments_per_floor;
+                    if (fm_wrap_angle(suzanne_angle - limit) >= FM_PI) {
+                        suzanne_angle = limit;
+                    }
+                }
+                if (tower_floors[floor]
+                        .vertical_walls[(segment + 1) %
+                                        tower.segments_per_floor]) {
+                    float limit = (segment * 2 * FM_PI + FM_DEG2RAD(50)) /
+                                  tower.segments_per_floor;
+                    if (fm_wrap_angle(suzanne_angle - limit) < FM_PI) {
+                        suzanne_angle = limit;
+                    }
+                }
+            }
+        }
         if (abs(inputs.stick_x) < 10) {
             float target_suzanne_angle =
                 fm_roundf(suzanne_angle /
@@ -179,10 +223,12 @@ int main(void) {
             if (floor >= 0 && floor < tower.n_floors) {
                 int corridor = tower_floors[floor].corridor;
                 if (corridor != -1) {
-                    int pos = (int)fm_roundf(
-                        suzanne_angle / (2 * FM_PI / tower.segments_per_floor));
-                    if (corridor == pos ||
-                        corridor + tower.segments_per_floor / 2 == pos) {
+                    int segment =
+                        (int)fm_roundf(suzanne_angle /
+                                       (2 * FM_PI / tower.segments_per_floor)) %
+                        tower.segments_per_floor;
+                    if (corridor == segment ||
+                        corridor + tower.segments_per_floor / 2 == segment) {
                         suzanne_angle += FM_PI;
                     }
                 }
@@ -195,6 +241,28 @@ int main(void) {
         }
         if (suzanne_height > tower.n_floors - 1 + 0.3f) {
             suzanne_height = tower.n_floors - 1 + 0.3f;
+        }
+        {
+            int segment =
+                (int)fm_roundf(suzanne_angle /
+                               (2 * FM_PI / tower.segments_per_floor)) %
+                tower.segments_per_floor;
+            int floor = (int)fm_roundf(suzanne_height);
+            if (floor >= 0 && floor < tower.n_floors) {
+                if (tower_floors[floor].horizontal_walls[segment]) {
+                    float limit = floor + 0.3f;
+                    if (suzanne_height > limit) {
+                        suzanne_height = limit;
+                    }
+                }
+                if (floor > 0 &&
+                    tower_floors[floor - 1].horizontal_walls[segment]) {
+                    float limit = floor - 0.3f;
+                    if (suzanne_height < limit) {
+                        suzanne_height = limit;
+                    }
+                }
+            }
         }
         if (abs(inputs.stick_y) < 10) {
             float target_suzanne_height = fm_roundf(suzanne_height);
@@ -292,9 +360,12 @@ int main(void) {
             if (corridor != -1) {
                 fm_quat_t rotation;
                 fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
-                                       corridor * 2 * FM_PI / 10);
+                                       corridor * 2 * FM_PI /
+                                           tower.segments_per_floor);
                 fm_mat4_rotate(&mat_model, &rotation);
             }
+            float s = 1.0f / 512;
+            fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
             mgfx_matrices_t *ud_matrices =
                 build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
 
@@ -318,6 +389,65 @@ int main(void) {
                     },
                     CylinderSegWithTunnel_0_indices,
                     ARRAY_COUNT(CylinderSegWithTunnel_0_indices), 0);
+            }
+        }
+
+        mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
+        rdpq_set_prim_color((color_t){50, 50, 200, 255});
+        for (int i = 0; i < tower.n_floors; i++) {
+            for (int j = 0; j < tower.segments_per_floor; j++) {
+                if (tower_floors[i].vertical_walls[j]) {
+                    fm_mat4_t mat_model;
+                    fm_mat4_identity(&mat_model);
+                    fm_mat4_translate(&mat_model,
+                                      &(fm_vec3_t){{0.0f, 0.0f, -0.5f + i}});
+                    fm_quat_t rotation;
+                    fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
+                                           j * 2 * FM_PI /
+                                               tower.segments_per_floor);
+                    fm_mat4_rotate(&mat_model, &rotation);
+                    float s = 1.0f / 512;
+                    fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
+                    mgfx_matrices_t *ud_matrices = build_matrices(
+                        gfx_ctx, &mat_projection, &mat_view, &mat_model);
+
+                    mg_uniform_load(u_matrices, ud_matrices);
+
+                    mg_bind_vertex_buffer(VerticalWall_0_vertices);
+                    mg_draw_indexed(
+                        &(mg_input_assembly_parms_t){
+                            MG_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                            false,
+                        },
+                        VerticalWall_0_indices,
+                        ARRAY_COUNT(VerticalWall_0_indices), 0);
+                }
+                if (tower_floors[i].horizontal_walls[j]) {
+                    fm_mat4_t mat_model;
+                    fm_mat4_identity(&mat_model);
+                    fm_mat4_translate(&mat_model,
+                                      &(fm_vec3_t){{0.0f, 0.0f, -0.5f + i}});
+                    fm_quat_t rotation;
+                    fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
+                                           j * 2 * FM_PI /
+                                               tower.segments_per_floor);
+                    fm_mat4_rotate(&mat_model, &rotation);
+                    float s = 1.0f / 512;
+                    fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
+                    mgfx_matrices_t *ud_matrices = build_matrices(
+                        gfx_ctx, &mat_projection, &mat_view, &mat_model);
+
+                    mg_uniform_load(u_matrices, ud_matrices);
+
+                    mg_bind_vertex_buffer(HorizontalWall_0_vertices);
+                    mg_draw_indexed(
+                        &(mg_input_assembly_parms_t){
+                            MG_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                            false,
+                        },
+                        HorizontalWall_0_indices,
+                        ARRAY_COUNT(HorizontalWall_0_indices), 0);
+                }
             }
         }
 

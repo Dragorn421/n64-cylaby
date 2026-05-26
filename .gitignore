@@ -8,3 +8,5 @@ build
 compile_commands.json
 
 .vscode
+
+*.blend1
