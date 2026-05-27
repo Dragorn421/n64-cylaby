@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Dragorn421
+// SPDX-License-Identifier: CC0-1.0
+
 #ifndef CYLABY_TOWER_H
 #define CYLABY_TOWER_H
 
