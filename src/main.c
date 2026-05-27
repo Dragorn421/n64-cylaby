@@ -12,8 +12,8 @@
 #include "model.h"
 #include "tower.h"
 
-#include "../assets/CylinderSegs.c"
-#include "../assets/Suzanne.c"
+#include "../assets/CylinderSegs.h"
+#include "../assets/Suzanne.h"
 
 #ifndef ARRAY_COUNT
 #define ARRAY_COUNT(arr) (sizeof(arr) / sizeof(arr[0]))
@@ -57,6 +57,16 @@ mgfx_matrices_t *build_matrices(struct GfxCtx *gfx_ctx,
                                    });
     data_cache_hit_writeback(ud_matrices, sizeof(mgfx_matrices_t));
     return ud_matrices;
+}
+
+void draw_primitive(struct primitive *primitive) {
+    mg_bind_vertex_buffer(primitive->vertices);
+    mg_draw_indexed(
+        &(mg_input_assembly_parms_t){
+            MG_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            false,
+        },
+        primitive->indices, primitive->index_count, 0);
 }
 
 // like fm_lerp_angle but working properly, for until my fm fixes make it
@@ -324,13 +334,7 @@ int main(void) {
 
             mg_uniform_load(u_matrices, ud_matrices);
 
-            mg_bind_vertex_buffer(Suzanne_0_vertices);
-            mg_draw_indexed(
-                &(mg_input_assembly_parms_t){
-                    MG_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                    false,
-                },
-                Suzanne_0_indices, ARRAY_COUNT(Suzanne_0_indices), 0);
+            draw_primitive(&Suzanne_0);
         }
 
         rdpq_set_prim_color((color_t){100, 100, 255, 255});
@@ -356,23 +360,9 @@ int main(void) {
             mg_uniform_load(u_matrices, ud_matrices);
 
             if (corridor == -1) {
-                mg_bind_vertex_buffer(CylinderSeg_0_vertices);
-                mg_draw_indexed(
-                    &(mg_input_assembly_parms_t){
-                        MG_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                        false,
-                    },
-                    CylinderSeg_0_indices, ARRAY_COUNT(CylinderSeg_0_indices),
-                    0);
+                draw_primitive(&CylinderSeg_0);
             } else {
-                mg_bind_vertex_buffer(CylinderSegWithTunnel_0_vertices);
-                mg_draw_indexed(
-                    &(mg_input_assembly_parms_t){
-                        MG_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                        false,
-                    },
-                    CylinderSegWithTunnel_0_indices,
-                    ARRAY_COUNT(CylinderSegWithTunnel_0_indices), 0);
+                draw_primitive(&CylinderSegWithTunnel_0);
             }
         }
 
@@ -397,14 +387,7 @@ int main(void) {
 
                     mg_uniform_load(u_matrices, ud_matrices);
 
-                    mg_bind_vertex_buffer(VerticalWall_0_vertices);
-                    mg_draw_indexed(
-                        &(mg_input_assembly_parms_t){
-                            MG_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                            false,
-                        },
-                        VerticalWall_0_indices,
-                        ARRAY_COUNT(VerticalWall_0_indices), 0);
+                    draw_primitive(&VerticalWall_0);
                 }
                 if (tower->floors[i].wall_flags[j] & WF_HORIZONTAL) {
                     fm_mat4_t mat_model;
@@ -423,14 +406,7 @@ int main(void) {
 
                     mg_uniform_load(u_matrices, ud_matrices);
 
-                    mg_bind_vertex_buffer(HorizontalWall_0_vertices);
-                    mg_draw_indexed(
-                        &(mg_input_assembly_parms_t){
-                            MG_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                            false,
-                        },
-                        HorizontalWall_0_indices,
-                        ARRAY_COUNT(HorizontalWall_0_indices), 0);
+                    draw_primitive(&HorizontalWall_0);
                 }
             }
         }

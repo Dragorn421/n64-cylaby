@@ -70,11 +70,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("gltf")
     parser.add_argument("c")
+    parser.add_argument("h")
     parser.add_argument("--scale", type=float, default=1.0)
     args = parser.parse_args()
 
     gltf = GLTF2.load(args.gltf)
     assert gltf is not None
+
+    declarations: list[str] = []
 
     with Path(args.c).open("w") as f:
         f.write("#include <stdint.h>\n")
@@ -129,6 +132,7 @@ def main():
                 assert np.max(indices) < n_vertices
 
                 f.write(f" struct vertex {primitive_prefix}_vertices[] = " "{\n")
+                declarations.append(f"struct vertex {primitive_prefix}_vertices[];")
                 for i_vertex in range(n_vertices):
                     pos = positions[i_vertex]
                     norm = normals[i_vertex]
@@ -141,6 +145,7 @@ def main():
                 f.write(" };\n")
 
                 f.write(f" uint16_t {primitive_prefix}_indices[] = " "{")
+                declarations.append(f"uint16_t {primitive_prefix}_indices[];")
                 for i_index in range(indices.shape[0]):
                     if i_index % 30 == 0:
                         f.write("\n ")
@@ -149,6 +154,7 @@ def main():
                 f.write(" };\n")
 
                 f.write(f" struct primitive {primitive_prefix} = " "{\n")
+                declarations.append(f"struct primitive {primitive_prefix};")
                 if primitive.material is None:
                     f.write(f"  -1,\n")
                 else:
@@ -161,13 +167,22 @@ def main():
                 primitives_symbols.append(primitive_prefix)
 
             f.write(f"struct primitive *{mesh_prefix}_primitives[] = " "{\n")
+            declarations.append(f"struct primitive *{mesh_prefix}_primitives[];")
             for prim_sym in primitives_symbols:
                 f.write(f" &{prim_sym},\n")
             f.write("};\n")
             f.write(f"struct mesh {mesh_prefix} = " "{\n")
+            declarations.append(f"struct mesh {mesh_prefix};")
             f.write(f" {mesh_prefix}_primitives,\n")
             f.write(f" {len(primitives_symbols)},\n")
             f.write("};\n")
+
+    with Path(args.h).open("w") as f:
+        f.write("#include <stdint.h>\n")
+        f.write("\n")
+        f.write('#include "model.h"\n')
+        f.write("\n")
+        f.write("".join(f"extern {decl}\n" for decl in declarations))
 
 
 if __name__ == "__main__":
