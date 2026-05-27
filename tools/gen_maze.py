@@ -32,6 +32,8 @@ tower = Tower(
     ]
 )
 
+tower.floors[1].corridor = 0
+tower.floors[2].corridor = 1
 
 @dataclasses.dataclass(eq=False)
 class Node:
