@@ -10,6 +10,7 @@
 #include <libdragon.h>
 
 #include "model.h"
+#include "tower.h"
 
 #include "../assets/CylinderSegs.c"
 #include "../assets/Suzanne.c"
@@ -145,81 +146,12 @@ int main(void) {
     float camera_eye_height = 0.0f;
     float camera_at_height = 0.0f;
 
-#define SEGMENTS_PER_FLOOR 10
-    struct {
-        int n_floors;
-        int segments_per_floor;
-    } tower = {5, SEGMENTS_PER_FLOOR};
-    struct {
-        int corridor;
-        bool vertical_walls[SEGMENTS_PER_FLOOR];
-        bool horizontal_walls[SEGMENTS_PER_FLOOR];
-    } tower_floors[tower.n_floors];
-    for (int i = 0; i < tower.n_floors; i++) {
-        tower_floors[i].corridor = -1;
-        for (int j = 0; j < tower.segments_per_floor; j++) {
-            tower_floors[i].vertical_walls[j] = false;
-            tower_floors[i].horizontal_walls[j] = false;
-        }
-    }
+    struct tower *tower =
+        malloc_tower(5, 10, WF_VERTICAL_UNSET | WF_HORIZONTAL_UNSET);
+    assert(tower != NULL);
 
-    {
-        tower_floors[0].horizontal_walls[0] = true;
-        tower_floors[0].vertical_walls[2] = true;
-        tower_floors[0].vertical_walls[3] = true;
-        tower_floors[0].vertical_walls[4] = true;
-        tower_floors[0].vertical_walls[5] = true;
-        tower_floors[0].horizontal_walls[5] = true;
-        tower_floors[0].horizontal_walls[7] = true;
-        tower_floors[0].vertical_walls[8] = true;
-        tower_floors[0].horizontal_walls[8] = true;
-        tower_floors[1].corridor = 0;
-        tower_floors[1].vertical_walls[0] = true;
-        tower_floors[1].horizontal_walls[0] = true;
-        tower_floors[1].horizontal_walls[1] = true;
-        tower_floors[1].vertical_walls[2] = true;
-        tower_floors[1].horizontal_walls[2] = true;
-        tower_floors[1].horizontal_walls[5] = true;
-        tower_floors[1].vertical_walls[6] = true;
-        tower_floors[1].horizontal_walls[6] = true;
-        tower_floors[1].horizontal_walls[7] = true;
-        tower_floors[1].horizontal_walls[8] = true;
-        tower_floors[2].corridor = 1;
-        tower_floors[2].horizontal_walls[0] = true;
-        tower_floors[2].vertical_walls[1] = true;
-        tower_floors[2].horizontal_walls[1] = true;
-        tower_floors[2].horizontal_walls[3] = true;
-        tower_floors[2].vertical_walls[4] = true;
-        tower_floors[2].horizontal_walls[4] = true;
-        tower_floors[2].vertical_walls[5] = true;
-        tower_floors[2].vertical_walls[6] = true;
-        tower_floors[2].horizontal_walls[7] = true;
-        tower_floors[2].vertical_walls[8] = true;
-        tower_floors[2].horizontal_walls[8] = true;
-        tower_floors[3].vertical_walls[2] = true;
-        tower_floors[3].vertical_walls[3] = true;
-        tower_floors[3].vertical_walls[5] = true;
-        tower_floors[3].vertical_walls[6] = true;
-        tower_floors[3].horizontal_walls[6] = true;
-        tower_floors[3].vertical_walls[7] = true;
-        tower_floors[3].horizontal_walls[7] = true;
-        tower_floors[4].vertical_walls[0] = true;
-        tower_floors[4].horizontal_walls[0] = true;
-        tower_floors[4].vertical_walls[1] = true;
-        tower_floors[4].horizontal_walls[1] = true;
-        tower_floors[4].vertical_walls[2] = true;
-        tower_floors[4].horizontal_walls[2] = true;
-        tower_floors[4].horizontal_walls[3] = true;
-        tower_floors[4].vertical_walls[4] = true;
-        tower_floors[4].horizontal_walls[4] = true;
-        tower_floors[4].horizontal_walls[5] = true;
-        tower_floors[4].horizontal_walls[6] = true;
-        tower_floors[4].vertical_walls[7] = true;
-        tower_floors[4].horizontal_walls[7] = true;
-        tower_floors[4].horizontal_walls[8] = true;
-        tower_floors[4].vertical_walls[9] = true;
-        tower_floors[4].horizontal_walls[9] = true;
-    }
+    srand(421);
+    build_tower_walls(tower);
 
     while (true) {
         struct GfxCtx *gfx_ctx = &gfx_ctx_buf[i_gfx_ctx];
@@ -239,22 +171,22 @@ int main(void) {
         {
             int segment =
                 (int)fm_roundf(suzanne_angle /
-                               (2 * FM_PI / tower.segments_per_floor)) %
-                tower.segments_per_floor;
+                               (2 * FM_PI / tower->segments_per_floor)) %
+                tower->segments_per_floor;
             int floor = (int)fm_roundf(suzanne_height);
-            if (floor >= 0 && floor < tower.n_floors) {
-                if (tower_floors[floor].vertical_walls[segment]) {
+            if (floor >= 0 && floor < tower->n_floors) {
+                if (tower->floors[floor].wall_flags[segment] & WF_VERTICAL) {
                     float limit = (segment * 2 * FM_PI - FM_DEG2RAD(50)) /
-                                  tower.segments_per_floor;
+                                  tower->segments_per_floor;
                     if (fm_wrap_angle(suzanne_angle - limit) >= FM_PI) {
                         suzanne_angle = limit;
                     }
                 }
-                if (tower_floors[floor]
-                        .vertical_walls[(segment + 1) %
-                                        tower.segments_per_floor]) {
+                if (tower->floors[floor]
+                        .wall_flags[(segment + 1) % tower->segments_per_floor] &
+                    WF_VERTICAL) {
                     float limit = (segment * 2 * FM_PI + FM_DEG2RAD(50)) /
-                                  tower.segments_per_floor;
+                                  tower->segments_per_floor;
                     if (fm_wrap_angle(suzanne_angle - limit) < FM_PI) {
                         suzanne_angle = limit;
                     }
@@ -264,23 +196,23 @@ int main(void) {
         if (abs(inputs.stick_x) < 10) {
             float target_suzanne_angle =
                 fm_roundf(suzanne_angle /
-                          (2 * FM_PI / tower.segments_per_floor)) *
-                (2 * FM_PI / tower.segments_per_floor);
+                          (2 * FM_PI / tower->segments_per_floor)) *
+                (2 * FM_PI / tower->segments_per_floor);
             suzanne_angle = my_lerp_angle(suzanne_angle, target_suzanne_angle,
                                           0.1f * 60 * dt);
         }
 
         if (pressed.a) {
             int floor = (int)fm_roundf(suzanne_height);
-            if (floor >= 0 && floor < tower.n_floors) {
-                int corridor = tower_floors[floor].corridor;
+            if (floor >= 0 && floor < tower->n_floors) {
+                int corridor = tower->floors[floor].corridor;
                 if (corridor != -1) {
-                    int segment =
-                        (int)fm_roundf(suzanne_angle /
-                                       (2 * FM_PI / tower.segments_per_floor)) %
-                        tower.segments_per_floor;
+                    int segment = (int)fm_roundf(
+                                      suzanne_angle /
+                                      (2 * FM_PI / tower->segments_per_floor)) %
+                                  tower->segments_per_floor;
                     if (corridor == segment ||
-                        corridor + tower.segments_per_floor / 2 == segment) {
+                        corridor + tower->segments_per_floor / 2 == segment) {
                         suzanne_angle += FM_PI;
                     }
                 }
@@ -291,24 +223,24 @@ int main(void) {
         if (suzanne_height < -0.3f) {
             suzanne_height = -0.3f;
         }
-        if (suzanne_height > tower.n_floors - 1 + 0.3f) {
-            suzanne_height = tower.n_floors - 1 + 0.3f;
+        if (suzanne_height > tower->n_floors - 1 + 0.3f) {
+            suzanne_height = tower->n_floors - 1 + 0.3f;
         }
         {
             int segment =
                 (int)fm_roundf(suzanne_angle /
-                               (2 * FM_PI / tower.segments_per_floor)) %
-                tower.segments_per_floor;
+                               (2 * FM_PI / tower->segments_per_floor)) %
+                tower->segments_per_floor;
             int floor = (int)fm_roundf(suzanne_height);
-            if (floor >= 0 && floor < tower.n_floors) {
-                if (tower_floors[floor].horizontal_walls[segment]) {
+            if (floor >= 0 && floor < tower->n_floors) {
+                if (tower->floors[floor].wall_flags[segment] & WF_HORIZONTAL) {
                     float limit = floor + 0.3f;
                     if (suzanne_height > limit) {
                         suzanne_height = limit;
                     }
                 }
-                if (floor > 0 &&
-                    tower_floors[floor - 1].horizontal_walls[segment]) {
+                if (floor > 0 && (tower->floors[floor - 1].wall_flags[segment] &
+                                  WF_HORIZONTAL)) {
                     float limit = floor - 0.3f;
                     if (suzanne_height < limit) {
                         suzanne_height = limit;
@@ -402,8 +334,8 @@ int main(void) {
         }
 
         rdpq_set_prim_color((color_t){100, 100, 255, 255});
-        for (int i = 0; i < tower.n_floors; i++) {
-            int corridor = tower_floors[i].corridor;
+        for (int i = 0; i < tower->n_floors; i++) {
+            int corridor = tower->floors[i].corridor;
 
             fm_mat4_t mat_model;
             fm_mat4_identity(&mat_model);
@@ -413,7 +345,7 @@ int main(void) {
                 fm_quat_t rotation;
                 fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
                                        corridor * 2 * FM_PI /
-                                           tower.segments_per_floor);
+                                           tower->segments_per_floor);
                 fm_mat4_rotate(&mat_model, &rotation);
             }
             float s = 1.0f / 512;
@@ -446,9 +378,9 @@ int main(void) {
 
         mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
         rdpq_set_prim_color((color_t){50, 50, 200, 255});
-        for (int i = 0; i < tower.n_floors; i++) {
-            for (int j = 0; j < tower.segments_per_floor; j++) {
-                if (tower_floors[i].vertical_walls[j]) {
+        for (int i = 0; i < tower->n_floors; i++) {
+            for (int j = 0; j < tower->segments_per_floor; j++) {
+                if (tower->floors[i].wall_flags[j] & WF_VERTICAL) {
                     fm_mat4_t mat_model;
                     fm_mat4_identity(&mat_model);
                     fm_mat4_translate(&mat_model,
@@ -456,7 +388,7 @@ int main(void) {
                     fm_quat_t rotation;
                     fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
                                            j * 2 * FM_PI /
-                                               tower.segments_per_floor);
+                                               tower->segments_per_floor);
                     fm_mat4_rotate(&mat_model, &rotation);
                     float s = 1.0f / 512;
                     fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
@@ -474,7 +406,7 @@ int main(void) {
                         VerticalWall_0_indices,
                         ARRAY_COUNT(VerticalWall_0_indices), 0);
                 }
-                if (tower_floors[i].horizontal_walls[j]) {
+                if (tower->floors[i].wall_flags[j] & WF_HORIZONTAL) {
                     fm_mat4_t mat_model;
                     fm_mat4_identity(&mat_model);
                     fm_mat4_translate(&mat_model,
@@ -482,7 +414,7 @@ int main(void) {
                     fm_quat_t rotation;
                     fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
                                            j * 2 * FM_PI /
-                                               tower.segments_per_floor);
+                                               tower->segments_per_floor);
                     fm_mat4_rotate(&mat_model, &rotation);
                     float s = 1.0f / 512;
                     fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
