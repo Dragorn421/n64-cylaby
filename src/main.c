@@ -9,10 +9,10 @@
 
 #include <libdragon.h>
 
+#include "geometry.h"
 #include "model.h"
 #include "tower.h"
 
-#include "../assets/CylinderSegs.h"
 #include "../assets/Suzanne.h"
 
 #ifndef ARRAY_COUNT
@@ -143,8 +143,6 @@ int main(void) {
                                         1,
                                     });
 
-    data_cache_writeback_invalidate_all();
-
     fm_mat4_t mat_projection;
     mg_mat4_perspective(&mat_projection, FM_DEG2RAD(60),
                         (float)display_get_width() / display_get_height(), 0.1f,
@@ -162,6 +160,14 @@ int main(void) {
 
     srand(421);
     build_tower_walls(tower);
+
+    struct primitive *tower_primitive = generate_tower_geometry(tower);
+    assert(tower_primitive != NULL);
+    struct primitive *tower_walls_primitive =
+        generate_tower_walls_geometry(tower);
+    assert(tower_walls_primitive != NULL);
+
+    data_cache_writeback_invalidate_all();
 
     while (true) {
         struct GfxCtx *gfx_ctx = &gfx_ctx_buf[i_gfx_ctx];
@@ -338,77 +344,30 @@ int main(void) {
         }
 
         rdpq_set_prim_color((color_t){100, 100, 255, 255});
-        for (int i = 0; i < tower->n_floors; i++) {
-            int corridor = tower->floors[i].corridor;
-
+        {
             fm_mat4_t mat_model;
             fm_mat4_identity(&mat_model);
-            fm_mat4_translate(&mat_model,
-                              &(fm_vec3_t){{0.0f, 0.0f, -0.5f + i}});
-            if (corridor != -1) {
-                fm_quat_t rotation;
-                fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
-                                       corridor * 2 * FM_PI /
-                                           tower->segments_per_floor);
-                fm_mat4_rotate(&mat_model, &rotation);
-            }
-            float s = 1.0f / 512;
-            fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
+            fm_mat4_translate(&mat_model, &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
             mgfx_matrices_t *ud_matrices =
                 build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
 
             mg_uniform_load(u_matrices, ud_matrices);
 
-            if (corridor == -1) {
-                draw_primitive(&CylinderSeg_0);
-            } else {
-                draw_primitive(&CylinderSegWithTunnel_0);
-            }
+            draw_primitive(tower_primitive);
         }
 
         mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
         rdpq_set_prim_color((color_t){50, 50, 200, 255});
-        for (int i = 0; i < tower->n_floors; i++) {
-            for (int j = 0; j < tower->segments_per_floor; j++) {
-                if (tower->floors[i].wall_flags[j] & WF_VERTICAL) {
-                    fm_mat4_t mat_model;
-                    fm_mat4_identity(&mat_model);
-                    fm_mat4_translate(&mat_model,
-                                      &(fm_vec3_t){{0.0f, 0.0f, -0.5f + i}});
-                    fm_quat_t rotation;
-                    fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
-                                           j * 2 * FM_PI /
-                                               tower->segments_per_floor);
-                    fm_mat4_rotate(&mat_model, &rotation);
-                    float s = 1.0f / 512;
-                    fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
-                    mgfx_matrices_t *ud_matrices = build_matrices(
-                        gfx_ctx, &mat_projection, &mat_view, &mat_model);
+        {
+            fm_mat4_t mat_model;
+            fm_mat4_identity(&mat_model);
+            fm_mat4_translate(&mat_model, &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
+            mgfx_matrices_t *ud_matrices =
+                build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
 
-                    mg_uniform_load(u_matrices, ud_matrices);
+            mg_uniform_load(u_matrices, ud_matrices);
 
-                    draw_primitive(&VerticalWall_0);
-                }
-                if (tower->floors[i].wall_flags[j] & WF_HORIZONTAL) {
-                    fm_mat4_t mat_model;
-                    fm_mat4_identity(&mat_model);
-                    fm_mat4_translate(&mat_model,
-                                      &(fm_vec3_t){{0.0f, 0.0f, -0.5f + i}});
-                    fm_quat_t rotation;
-                    fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
-                                           j * 2 * FM_PI /
-                                               tower->segments_per_floor);
-                    fm_mat4_rotate(&mat_model, &rotation);
-                    float s = 1.0f / 512;
-                    fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
-                    mgfx_matrices_t *ud_matrices = build_matrices(
-                        gfx_ctx, &mat_projection, &mat_view, &mat_model);
-
-                    mg_uniform_load(u_matrices, ud_matrices);
-
-                    draw_primitive(&HorizontalWall_0);
-                }
-            }
+            draw_primitive(tower_walls_primitive);
         }
 
         rdpq_detach_show();
