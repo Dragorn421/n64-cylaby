@@ -158,6 +158,9 @@ int main(void) {
         malloc_tower(5, 10, WF_VERTICAL_UNSET | WF_HORIZONTAL_UNSET);
     assert(tower != NULL);
 
+    tower->floors[1].corridor = 1;
+    tower->floors[3].corridor = 2;
+
     srand(421);
     build_tower_walls(tower);
 

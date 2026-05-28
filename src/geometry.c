@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Dragorn421
 // SPDX-License-Identifier: CC0-1.0
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,6 +86,41 @@ struct geom_polygon *add_polygon(struct geom_mesh *mesh) {
     return &mesh->polygons[mesh->n_polygons++];
 }
 
+bool add_quad(struct geom_mesh *mesh, fm_vec3_t *a, fm_vec3_t *b, fm_vec3_t *c,
+              fm_vec3_t *d) {
+    int i_a, i_b, i_c, i_d;
+    fm_vec3_t *v_a, *v_b, *v_c, *v_d;
+    v_a = add_vertex(mesh, &i_a);
+    if (v_a == NULL) {
+        return false;
+    }
+    *v_a = *a;
+    v_b = add_vertex(mesh, &i_b);
+    if (v_b == NULL) {
+        return false;
+    }
+    *v_b = *b;
+    v_c = add_vertex(mesh, &i_c);
+    if (v_c == NULL) {
+        return false;
+    }
+    *v_c = *c;
+    v_d = add_vertex(mesh, &i_d);
+    if (v_d == NULL) {
+        return false;
+    }
+    *v_d = *d;
+    struct geom_polygon *polygon = add_polygon(mesh);
+    if (polygon == NULL) {
+        return false;
+    }
+    *polygon = (struct geom_polygon){
+        {i_a, i_b, i_c, i_d},
+        4,
+    };
+    return true;
+}
+
 struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh) {
     struct primitive *primitive = malloc(sizeof(struct primitive));
     if (primitive == NULL) {
@@ -143,9 +179,12 @@ struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh) {
 void generate_tower_geometry_floor(struct geom_mesh *mesh,
                                    int segments_per_floor, int floor,
                                    int corridor) {
-    // TODO handle corridor
     float angle = -2 * FM_PI / segments_per_floor / 2;
     fm_vec3_t a, d;
+    struct {
+        fm_vec3_t a2, b2, c2, d2;
+    } corridor_verts[2];
+    int n_corridor_verts = 0;
     for (int i = -1; i < segments_per_floor; i++) {
         fm_vec3_t b, c;
         fm_sincosf(angle, &b.y, &b.x);
@@ -153,19 +192,42 @@ void generate_tower_geometry_floor(struct geom_mesh *mesh,
         c = b;
         c.z = 1.0f + floor;
         if (i != -1) {
-            int i_a, i_b, i_c, i_d;
-            *add_vertex(mesh, &i_a) = a;
-            *add_vertex(mesh, &i_b) = b;
-            *add_vertex(mesh, &i_c) = c;
-            *add_vertex(mesh, &i_d) = d;
-            *add_polygon(mesh) = (struct geom_polygon){
-                {i_a, i_b, i_c, i_d},
-                4,
-            };
+            if (corridor != -1 &&
+                (i == corridor || i == corridor + segments_per_floor / 2)) {
+                fm_vec3_t fc; // face center
+                fm_vec3_lerp(&fc, &a, &c, 0.5f);
+                fm_vec3_t a2, b2, c2, d2;
+                fm_vec3_lerp(&a2, &a, &fc, 0.2f);
+                fm_vec3_lerp(&b2, &b, &fc, 0.2f);
+                fm_vec3_lerp(&c2, &c, &fc, 0.2f);
+                fm_vec3_lerp(&d2, &d, &fc, 0.2f);
+                add_quad(mesh, &a, &b, &b2, &a2);
+                add_quad(mesh, &b, &c, &c2, &b2);
+                add_quad(mesh, &c, &d, &d2, &c2);
+                add_quad(mesh, &d, &a, &a2, &d2);
+                corridor_verts[n_corridor_verts].a2 = a2;
+                corridor_verts[n_corridor_verts].b2 = b2;
+                corridor_verts[n_corridor_verts].c2 = c2;
+                corridor_verts[n_corridor_verts].d2 = d2;
+                n_corridor_verts++;
+            } else {
+                add_quad(mesh, &a, &b, &c, &d);
+            }
         }
         a = b;
         d = c;
         angle += 2 * FM_PI / segments_per_floor;
+    }
+    if (corridor != -1) {
+        assert(n_corridor_verts == 2);
+        fm_vec3_t *a1 = &corridor_verts[0].a2, *b1 = &corridor_verts[0].b2,
+                  *c1 = &corridor_verts[0].c2, *d1 = &corridor_verts[0].d2;
+        fm_vec3_t *a2 = &corridor_verts[1].a2, *b2 = &corridor_verts[1].b2,
+                  *c2 = &corridor_verts[1].c2, *d2 = &corridor_verts[1].d2;
+        add_quad(mesh, a1, b1, a2, b2);
+        add_quad(mesh, b1, c1, d2, a2);
+        add_quad(mesh, c1, d1, c2, d2);
+        add_quad(mesh, d1, a1, b2, c2);
     }
 }
 
