@@ -267,8 +267,14 @@ int main(void) {
             seed = (unsigned int)getentropy32() + (unsigned int)get_ticks();
             srand(seed);
 
-            tower->floors[1].corridor = 1;
-            tower->floors[3].corridor = 2;
+            int n_corridors = 1 + rand() % 2;
+            if (rand() % 3 == 0) {
+                n_corridors += 1;
+            }
+            for (int i = 0; i < n_corridors; i++) {
+                tower->floors[rand() % tower->n_floors].corridor =
+                    rand() % (tower->segments_per_floor / 2);
+            }
 
             build_tower_walls(tower);
 
