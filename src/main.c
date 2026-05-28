@@ -19,13 +19,35 @@
 #define ARRAY_COUNT(arr) (sizeof(arr) / sizeof(arr[0]))
 #endif
 
+/**
+ * The GfxCtx struct holds data relevant to each frame, for example to achieve
+ * N-buffering of uniform data.
+ */
 struct GfxCtx {
+    /**
+     * Matrices uniform data buffer.
+     * This buffer holds matrices uniforms generated every frame.
+     * The next free index in the buffer is stored in i_ud_mat_buf.
+     */
     mgfx_matrices_t ud_mat_buf[5];
     int i_ud_mat_buf;
+    /**
+     * This buffer keeps track of the (dynamically allocated) primitives used by
+     * this context's frame, for the purpose of not freeing them while they're
+     * in use.
+     * The amount of valid entries (or equivalently the next free index) is
+     * stored in n_used_primitives.
+     */
     struct primitive *used_primitives[2];
     int n_used_primitives;
 };
 
+/**
+ * Given the projection, view and model matrices, compute the relevant matrices
+ * and convert them to uniform data for the mgfx vertex shader.
+ * The uniform data is stored inside the given gfx_ctx. The function asserts if
+ * the uniform data buffer is full.
+ */
 mgfx_matrices_t *build_matrices(struct GfxCtx *gfx_ctx,
                                 fm_mat4_t *mat_projection, fm_mat4_t *mat_view,
                                 fm_mat4_t *mat_model) {
@@ -61,6 +83,10 @@ mgfx_matrices_t *build_matrices(struct GfxCtx *gfx_ctx,
     return ud_matrices;
 }
 
+/**
+ * Add a primitive to the list of the frame's used primitives.
+ * This function asserts if there is no more space in the buffer.
+ */
 void add_used_primitive(struct GfxCtx *gfx_ctx, struct primitive *primitive) {
     assert(gfx_ctx->n_used_primitives < ARRAY_COUNT(gfx_ctx->used_primitives));
     gfx_ctx->used_primitives[gfx_ctx->n_used_primitives++] = primitive;
@@ -76,6 +102,11 @@ void draw_primitive(struct primitive *primitive) {
         primitive->indices, primitive->index_count, 0);
 }
 
+/**
+ * This "defered primitives free" mechanism tracks which (dynamically allocated)
+ * primitives should be freed, and frees them when no frame needs them (when no
+ * GfxCtx references them anymore).
+ */
 struct defered_primitives_free_ctx {
     struct {
         struct primitive *primitive;
@@ -91,6 +122,9 @@ void defered_primitives_free_init_ctx(struct defered_primitives_free_ctx *ctx) {
     ctx->has_primitives_to_free = false;
 }
 
+/**
+ * Add a primitive to be freed once it's no longer in use.
+ */
 void defered_primitives_free_add(struct defered_primitives_free_ctx *ctx,
                                  struct primitive *primitive,
                                  void (*free_func)(struct primitive *)) {
@@ -107,6 +141,9 @@ void defered_primitives_free_add(struct defered_primitives_free_ctx *ctx,
     ctx->has_primitives_to_free = true;
 }
 
+/**
+ * Perform the free operations if possible.
+ */
 void defered_primitives_free_free(struct defered_primitives_free_ctx *ctx,
                                   struct GfxCtx *gfx_ctx_buf, int n_gfx_ctx) {
     if (!ctx->has_primitives_to_free) {
@@ -222,6 +259,7 @@ int main(void) {
                         (float)display_get_width() / display_get_height(), 0.1f,
                         10.0f);
 
+    // "_angle" refer to angular positions (in radians)
     float suzanne_angle = 0.0f;
     float suzanne_height = 0.0f;
     float camera_angle = 0.0f;
@@ -238,6 +276,7 @@ int main(void) {
     bool rebuild_tower = true;
 
     while (true) {
+        // get and initialize GfxCtx
         struct GfxCtx *gfx_ctx = &gfx_ctx_buf[i_gfx_ctx];
         i_gfx_ctx++;
         i_gfx_ctx %= display_get_num_buffers();
@@ -262,6 +301,7 @@ int main(void) {
                 tower_walls_primitive = NULL;
             }
 
+            // malloc the tower data, with unset walls
             tower =
                 malloc_tower(5, 10, WF_VERTICAL_UNSET | WF_HORIZONTAL_UNSET);
             assert(tower != NULL);
@@ -269,6 +309,7 @@ int main(void) {
             seed = (unsigned int)getentropy32() + (unsigned int)get_ticks();
             srand(seed);
 
+            // randomly add corridors
             int n_corridors = 1 + rand() % 2;
             if (rand() % 3 == 0) {
                 n_corridors += 1;
@@ -278,8 +319,10 @@ int main(void) {
                     rand() % (tower->segments_per_floor / 2);
             }
 
+            // randomly build walls
             build_tower_walls(tower);
 
+            // Generate the primitives that will be drawn
             tower_primitive = generate_tower_geometry(tower);
             assert(tower_primitive != NULL);
             tower_walls_primitive = generate_tower_walls_geometry(tower);
@@ -297,6 +340,11 @@ int main(void) {
         joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
         joypad_buttons_t pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
 
+        /*
+         * Input and collision handling
+         */
+
+        // Horizontal movement
         suzanne_angle += inputs.stick_x / 60.0f * FM_DEG2RAD(100) * dt;
         suzanne_angle = fm_wrap_angle(suzanne_angle);
         {
@@ -333,6 +381,7 @@ int main(void) {
                                           0.1f * 60 * dt);
         }
 
+        // Going through corridors
         if (pressed.a) {
             int floor = (int)fm_roundf(suzanne_height);
             if (floor >= 0 && floor < tower->n_floors) {
@@ -354,6 +403,7 @@ int main(void) {
             rebuild_tower = true;
         }
 
+        // Vertical movement
         suzanne_height += inputs.stick_y / 60.0f * dt;
         if (suzanne_height < -0.3f) {
             suzanne_height = -0.3f;
@@ -389,6 +439,10 @@ int main(void) {
                 fm_lerp(suzanne_height, target_suzanne_height, 0.1f * 60 * dt);
         }
 
+        /*
+         * Camera/view handling
+         */
+
         camera_angle =
             my_lerp_angle(camera_angle, suzanne_angle, 0.1f * 60 * dt);
         camera_at_height =
@@ -404,6 +458,10 @@ int main(void) {
         fm_vec3_t target = {{0, 0, camera_at_height}};
         fm_mat4_t mat_view;
         fm_mat4_lookat(&mat_view, &eye, &target, &(fm_vec3_t){{0, 0, 1}});
+
+        /*
+         * Drawing
+         */
 
         rdpq_attach(surf, display_get_zbuf());
 
@@ -422,8 +480,6 @@ int main(void) {
         rdpq_mode_combiner(RDPQ_COMBINER1((PRIM, 0, SHADE, 0), (0, 0, 0, 1)));
         rdpq_mode_zbuf(true, true);
         rdpq_mode_end();
-
-        rdpq_set_prim_color((color_t){255, 100, 100, 255});
 
         mg_pipeline_bind(pipeline);
 
@@ -444,6 +500,8 @@ int main(void) {
         mg_uniform_load(u_fog, &ud_fog);
         mg_uniform_load(u_lighting, &ud_lighting);
 
+        // Draw Suzanne
+        rdpq_set_prim_color((color_t){255, 100, 100, 255});
         {
             fm_mat4_t mat_model;
             fm_mat4_identity(&mat_model);
@@ -462,6 +520,7 @@ int main(void) {
             draw_primitive(&Suzanne_0);
         }
 
+        // Draw the tower
         rdpq_set_prim_color((color_t){100, 100, 255, 255});
         {
             fm_mat4_t mat_model;
@@ -476,6 +535,7 @@ int main(void) {
             draw_primitive(tower_primitive);
         }
 
+        // Draw the tower walls
         mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
         rdpq_set_prim_color((color_t){50, 50, 200, 255});
         {
@@ -491,8 +551,8 @@ int main(void) {
             draw_primitive(tower_walls_primitive);
         }
 
+        // Print the seed
         rdpq_set_mode_standard();
-
         rdpq_text_printf(&(rdpq_textparms_t){}, font_id, 10, 10, "0x%08X",
                          seed);
 

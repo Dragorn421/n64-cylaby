@@ -12,6 +12,10 @@
 #include "model.h"
 #include "tower.h"
 
+/*
+ * Basic runtime geometry helpers.
+ */
+
 struct geom_polygon {
 #define POLY_MAX_VERTS 4
     int vertices[POLY_MAX_VERTS];
@@ -19,7 +23,15 @@ struct geom_polygon {
 };
 
 struct geom_mesh {
+    /**
+     * Buffer of vertices. There are n_vertices vertices. The buffer can hold up
+     * to max_vertices. The add_vertex function automatically grows the buffer.
+     */
     fm_vec3_t *vertices;
+    /**
+     * Buffer of polygons. There are n_polygons vertices. The buffer can hold up
+     * to max_polygons. The add_polygon function automatically grows the buffer.
+     */
     struct geom_polygon *polygons;
     int max_vertices;
     int n_vertices;
@@ -53,6 +65,10 @@ void free_mesh(struct geom_mesh *mesh) {
     free(mesh);
 }
 
+/**
+ * Add a vertex to a mesh, returning a pointer to its (uninitialized) data (or
+ * NULL on failure), and setting i_vertex_p to the corresponding vertex index.
+ */
 fm_vec3_t *add_vertex(struct geom_mesh *mesh, int *i_vertex_p) {
     if (mesh->n_vertices == mesh->max_vertices) {
         int new_max_vertices = mesh->max_vertices * 2;
@@ -71,6 +87,10 @@ fm_vec3_t *add_vertex(struct geom_mesh *mesh, int *i_vertex_p) {
     return &mesh->vertices[mesh->n_vertices++];
 }
 
+/**
+ * Add a polygon to a mesh, returning a pointer to its (uninitialized) data (or
+ * NULL on failure).
+ */
 struct geom_polygon *add_polygon(struct geom_mesh *mesh) {
     if (mesh->n_polygons == mesh->max_polygons) {
         int new_max_polygons = mesh->max_polygons * 2;
@@ -86,6 +106,10 @@ struct geom_polygon *add_polygon(struct geom_mesh *mesh) {
     return &mesh->polygons[mesh->n_polygons++];
 }
 
+/**
+ * Helper for adding a quad to a mesh, given four vertices.
+ * Returns true on success.
+ */
 bool add_quad(struct geom_mesh *mesh, fm_vec3_t *a, fm_vec3_t *b, fm_vec3_t *c,
               fm_vec3_t *d) {
     int i_a, i_b, i_c, i_d;
@@ -121,6 +145,9 @@ bool add_quad(struct geom_mesh *mesh, fm_vec3_t *a, fm_vec3_t *b, fm_vec3_t *c,
     return true;
 }
 
+/**
+ * Convert a mesh to a (dynamically allocated) primitive (data that can be drawn).
+ */
 struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh) {
     struct primitive *primitive = malloc(sizeof(struct primitive));
     if (primitive == NULL) {
