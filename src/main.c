@@ -215,6 +215,8 @@ int main(void) {
                                         1,
                                     });
 
+    data_cache_writeback_invalidate_all();
+
     fm_mat4_t mat_projection;
     mg_mat4_perspective(&mat_projection, FM_DEG2RAD(60),
                         (float)display_get_width() / display_get_height(), 0.1f,
