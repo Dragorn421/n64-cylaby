@@ -20,8 +20,10 @@
 #endif
 
 struct GfxCtx {
-    mgfx_matrices_t ud_mat_buf[100];
+    mgfx_matrices_t ud_mat_buf[5];
     int i_ud_mat_buf;
+    struct primitive *used_primitives[2];
+    int n_used_primitives;
 };
 
 mgfx_matrices_t *build_matrices(struct GfxCtx *gfx_ctx,
@@ -59,6 +61,11 @@ mgfx_matrices_t *build_matrices(struct GfxCtx *gfx_ctx,
     return ud_matrices;
 }
 
+void add_used_primitive(struct GfxCtx *gfx_ctx, struct primitive *primitive) {
+    assert(gfx_ctx->n_used_primitives < ARRAY_COUNT(gfx_ctx->used_primitives));
+    gfx_ctx->used_primitives[gfx_ctx->n_used_primitives++] = primitive;
+}
+
 void draw_primitive(struct primitive *primitive) {
     mg_bind_vertex_buffer(primitive->vertices);
     mg_draw_indexed(
@@ -67,6 +74,67 @@ void draw_primitive(struct primitive *primitive) {
             false,
         },
         primitive->indices, primitive->index_count, 0);
+}
+
+struct defered_primitives_free_ctx {
+    struct {
+        struct primitive *primitive;
+        void (*free_func)(struct primitive *);
+    } primitives_to_free[6];
+    bool has_primitives_to_free;
+};
+
+void defered_primitives_free_init_ctx(struct defered_primitives_free_ctx *ctx) {
+    for (int i = 0; i < ARRAY_COUNT(ctx->primitives_to_free); i++) {
+        ctx->primitives_to_free[i].primitive = NULL;
+    }
+    ctx->has_primitives_to_free = false;
+}
+
+void defered_primitives_free_add(struct defered_primitives_free_ctx *ctx,
+                                 struct primitive *primitive,
+                                 void (*free_func)(struct primitive *)) {
+    bool is_full = true;
+    for (int i = 0; i < ARRAY_COUNT(ctx->primitives_to_free); i++) {
+        if (ctx->primitives_to_free[i].primitive == NULL) {
+            ctx->primitives_to_free[i].primitive = primitive;
+            ctx->primitives_to_free[i].free_func = free_func;
+            is_full = false;
+            break;
+        }
+    }
+    assert(!is_full);
+    ctx->has_primitives_to_free = true;
+}
+
+void defered_primitives_free_free(struct defered_primitives_free_ctx *ctx,
+                                  struct GfxCtx *gfx_ctx_buf, int n_gfx_ctx) {
+    if (!ctx->has_primitives_to_free) {
+        return;
+    }
+    bool all_freed = true;
+    for (int i = 0; i < ARRAY_COUNT(ctx->primitives_to_free); i++) {
+        if (ctx->primitives_to_free[i].primitive != NULL) {
+            bool is_primitive_used = false;
+            for (int j = 0; j < n_gfx_ctx; j++) {
+                struct GfxCtx *gfx_ctx = &gfx_ctx_buf[j];
+                for (int k = 0; k < gfx_ctx->n_used_primitives; k++) {
+                    if (gfx_ctx->used_primitives[k] ==
+                        ctx->primitives_to_free[i].primitive) {
+                        is_primitive_used = true;
+                    }
+                }
+            }
+            if (is_primitive_used) {
+                ctx->primitives_to_free[i].free_func(
+                    ctx->primitives_to_free[i].primitive);
+                ctx->primitives_to_free[i].primitive = NULL;
+            } else {
+                all_freed = false;
+            }
+        }
+    }
+    ctx->has_primitives_to_free = !all_freed;
 }
 
 // like fm_lerp_angle but working properly, for until my fm fixes make it
@@ -97,6 +165,10 @@ int main(void) {
         rdpq_debug_log(true);
     }
     mg_init();
+
+    const uint8_t font_id = 1;
+    rdpq_text_register_font(font_id,
+                            rdpq_font_load_builtin(FONT_BUILTIN_DEBUG_MONO));
 
     struct GfxCtx *gfx_ctx_buf =
         malloc(sizeof(struct GfxCtx) * display_get_num_buffers());
@@ -154,29 +226,61 @@ int main(void) {
     float camera_eye_height = 0.0f;
     float camera_at_height = 0.0f;
 
-    struct tower *tower =
-        malloc_tower(5, 10, WF_VERTICAL_UNSET | WF_HORIZONTAL_UNSET);
-    assert(tower != NULL);
+    struct defered_primitives_free_ctx defered_primitives_free_ctx;
+    defered_primitives_free_init_ctx(&defered_primitives_free_ctx);
 
-    tower->floors[1].corridor = 1;
-    tower->floors[3].corridor = 2;
-
-    srand(421);
-    build_tower_walls(tower);
-
-    struct primitive *tower_primitive = generate_tower_geometry(tower);
-    assert(tower_primitive != NULL);
-    struct primitive *tower_walls_primitive =
-        generate_tower_walls_geometry(tower);
-    assert(tower_walls_primitive != NULL);
-
-    data_cache_writeback_invalidate_all();
+    unsigned int seed;
+    struct tower *tower = NULL;
+    struct primitive *tower_primitive = NULL;
+    struct primitive *tower_walls_primitive = NULL;
+    bool rebuild_tower = true;
 
     while (true) {
         struct GfxCtx *gfx_ctx = &gfx_ctx_buf[i_gfx_ctx];
         i_gfx_ctx++;
         i_gfx_ctx %= display_get_num_buffers();
         gfx_ctx->i_ud_mat_buf = 0;
+        gfx_ctx->n_used_primitives = 0;
+
+        if (rebuild_tower) {
+            if (tower != NULL) {
+                free_tower(tower);
+                tower = NULL;
+            }
+            if (tower_primitive != NULL) {
+                defered_primitives_free_add(&defered_primitives_free_ctx,
+                                            tower_primitive,
+                                            geom_mesh_free_primitive);
+                tower_primitive = NULL;
+            }
+            if (tower_walls_primitive != NULL) {
+                defered_primitives_free_add(&defered_primitives_free_ctx,
+                                            tower_walls_primitive,
+                                            geom_mesh_free_primitive);
+                tower_walls_primitive = NULL;
+            }
+
+            tower =
+                malloc_tower(5, 10, WF_VERTICAL_UNSET | WF_HORIZONTAL_UNSET);
+            assert(tower != NULL);
+
+            seed = (unsigned int)getentropy32() + (unsigned int)get_ticks();
+            srand(seed);
+
+            tower->floors[1].corridor = 1;
+            tower->floors[3].corridor = 2;
+
+            build_tower_walls(tower);
+
+            tower_primitive = generate_tower_geometry(tower);
+            assert(tower_primitive != NULL);
+            tower_walls_primitive = generate_tower_walls_geometry(tower);
+            assert(tower_walls_primitive != NULL);
+
+            data_cache_writeback_invalidate_all();
+
+            rebuild_tower = false;
+        }
 
         surface_t *surf = display_get();
         uint64_t t = get_ticks_ms();
@@ -236,6 +340,10 @@ int main(void) {
                     }
                 }
             }
+        }
+
+        if (pressed.z) {
+            rebuild_tower = true;
         }
 
         suzanne_height += inputs.stick_y / 60.0f * dt;
@@ -356,6 +464,7 @@ int main(void) {
 
             mg_uniform_load(u_matrices, ud_matrices);
 
+            add_used_primitive(gfx_ctx, tower_primitive);
             draw_primitive(tower_primitive);
         }
 
@@ -370,9 +479,18 @@ int main(void) {
 
             mg_uniform_load(u_matrices, ud_matrices);
 
+            add_used_primitive(gfx_ctx, tower_walls_primitive);
             draw_primitive(tower_walls_primitive);
         }
 
+        rdpq_set_mode_standard();
+
+        rdpq_text_printf(&(rdpq_textparms_t){}, font_id, 10, 10, "0x%08X",
+                         seed);
+
         rdpq_detach_show();
+
+        defered_primitives_free_free(&defered_primitives_free_ctx, gfx_ctx_buf,
+                                     display_get_num_buffers());
     }
 }

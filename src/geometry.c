@@ -176,6 +176,12 @@ struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh) {
     return primitive;
 }
 
+void geom_mesh_free_primitive(struct primitive *primitive) {
+    free(primitive->vertices);
+    free(primitive->indices);
+    free(primitive);
+}
+
 void generate_tower_geometry_floor(struct geom_mesh *mesh,
                                    int segments_per_floor, int floor,
                                    int corridor) {

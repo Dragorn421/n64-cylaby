@@ -33,6 +33,8 @@ struct tower *malloc_tower(int n_floors, int segments_per_floor,
     return tower;
 }
 
+void free_tower(struct tower *tower) { free(tower); }
+
 enum connected_state {
     CONNECTED_STATE_UNSET,
     CONNECTED_STATE_YES,

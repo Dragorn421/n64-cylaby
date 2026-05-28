@@ -23,6 +23,7 @@ struct tower_floor {
 
 struct tower *malloc_tower(int n_floors, int segments_per_floor,
                            uint8_t wall_flags);
+void free_tower(struct tower *tower);
 
 void build_tower_walls(struct tower *tower);
 
