@@ -162,7 +162,7 @@ void defered_primitives_free_free(struct defered_primitives_free_ctx *ctx,
                     }
                 }
             }
-            if (is_primitive_used) {
+            if (!is_primitive_used) {
                 ctx->primitives_to_free[i].free_func(
                     ctx->primitives_to_free[i].primitive);
                 ctx->primitives_to_free[i].primitive = NULL;
