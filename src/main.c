@@ -182,11 +182,34 @@ float my_lerp_angle(float a, float b, float t) {
     return a + dist * t;
 }
 
+float my_lerp_angle_maxed(float a, float b, float t, float max_step) {
+    float diff = fmodf((b - a), FM_PI * 2);
+    float dist = fmodf(diff * 2, FM_PI * 2) - diff;
+    float step = dist * t;
+    if (step < -max_step) {
+        step = -max_step;
+    }
+    if (step > max_step) {
+        step = max_step;
+    }
+    return a + step;
+}
+
 float fm_wrapf(float x, float y) {
     float v = fm_fmodf(x, y);
     if (v < 0)
         v += y;
     return v;
+}
+
+// like fm_mat4_scale but working properly
+inline void fm_mat4_scale_fixed(fm_mat4_t *out, const fm_vec3_t *scale) {
+    for (int i = 0; i < 4; i++)
+        out->m[i][0] *= scale->x;
+    for (int i = 0; i < 4; i++)
+        out->m[i][1] *= scale->y;
+    for (int i = 0; i < 4; i++)
+        out->m[i][2] *= scale->z;
 }
 
 int main(void) {
@@ -254,17 +277,72 @@ int main(void) {
 
     data_cache_writeback_invalidate_all();
 
+    struct textured_vertex {
+        int16_t pos[3];
+        alignas(4) int16_t st[2];
+    };
+
+    mg_vertex_attribute_t textured_vertex_attributes[] = {
+        {
+            .input = MGFX_ATTRIBUTE_POSITION,
+            .offset = offsetof(struct textured_vertex, pos),
+        },
+        {
+            .input = MGFX_ATTRIBUTE_TEXCOORD,
+            .offset = offsetof(struct textured_vertex, st),
+        },
+    };
+
+    mg_pipeline_t *textured_pipeline = mg_pipeline_create(&(
+        mg_pipeline_parms_t){
+        mgfx_get_shader_ucode(0),
+        .vertex_layout.attribute_count = sizeof(textured_vertex_attributes) /
+                                         sizeof(textured_vertex_attributes[0]),
+        .vertex_layout.attributes = textured_vertex_attributes,
+        .vertex_layout.stride = sizeof(struct textured_vertex),
+    });
+
+    const mg_uniform_t *textured_u_fog =
+        mg_pipeline_get_uniform(textured_pipeline, MGFX_BINDING_FOG);
+    const mg_uniform_t *textured_u_texturing =
+        mg_pipeline_get_uniform(textured_pipeline, MGFX_BINDING_TEXTURING);
+    const mg_uniform_t *textured_u_matrices =
+        mg_pipeline_get_uniform(textured_pipeline, MGFX_BINDING_MATRICES);
+
+    mgfx_fog_t textured_ud_fog;
+    mgfx_get_fog(&textured_ud_fog, &(mgfx_fog_parms_t){0});
+
+    mgfx_texturing_t textured_ud_texturing;
+    mgfx_get_texturing(&textured_ud_texturing, &(mgfx_texturing_parms_t){
+                                                   {1, 1},
+                                                   {0, 0},
+                                               });
+
+    data_cache_writeback_invalidate_all();
+
     fm_mat4_t mat_projection;
     mg_mat4_perspective(&mat_projection, FM_DEG2RAD(60),
                         (float)display_get_width() / display_get_height(), 0.1f,
                         10.0f);
 
-    // "_angle" refer to angular positions (in radians)
-    float suzanne_angle = 0.0f;
-    float suzanne_height = 0.0f;
-    float camera_angle = 0.0f;
-    float camera_eye_height = 0.0f;
-    float camera_at_height = 0.0f;
+    struct {
+        float suzanne_x;
+        float suzanne_y;
+        float suzanne_yaw;
+        float suzanne_yaw_idle_time;
+        float camera_yaw;
+    } free_roam_ctx = {0};
+
+    struct {
+        // "_angle" refer to angular positions (in radians)
+        float suzanne_angle;
+        float suzanne_height;
+        float camera_angle;
+        float camera_eye_height;
+        float camera_at_height;
+    } tower_climb_ctx = {0};
+
+    bool is_climbing_tower = false;
 
     struct defered_primitives_free_ctx defered_primitives_free_ctx;
     defered_primitives_free_init_ctx(&defered_primitives_free_ctx);
@@ -340,124 +418,199 @@ int main(void) {
         joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
         joypad_buttons_t pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
 
-        /*
-         * Input and collision handling
-         */
-
-        // Horizontal movement
-        suzanne_angle += inputs.stick_x / 60.0f * FM_DEG2RAD(100) * dt;
-        suzanne_angle = fm_wrap_angle(suzanne_angle);
-        {
-            int segment =
-                (int)fm_roundf(suzanne_angle /
-                               (2 * FM_PI / tower->segments_per_floor)) %
-                tower->segments_per_floor;
-            int floor = (int)fm_roundf(suzanne_height);
-            if (floor >= 0 && floor < tower->n_floors) {
-                if (tower->floors[floor].wall_flags[segment] & WF_VERTICAL) {
-                    float limit = (segment * 2 * FM_PI - FM_DEG2RAD(50)) /
-                                  tower->segments_per_floor;
-                    if (fm_wrap_angle(suzanne_angle - limit) >= FM_PI) {
-                        suzanne_angle = limit;
-                    }
-                }
-                if (tower->floors[floor]
-                        .wall_flags[(segment + 1) % tower->segments_per_floor] &
-                    WF_VERTICAL) {
-                    float limit = (segment * 2 * FM_PI + FM_DEG2RAD(50)) /
-                                  tower->segments_per_floor;
-                    if (fm_wrap_angle(suzanne_angle - limit) < FM_PI) {
-                        suzanne_angle = limit;
-                    }
-                }
-            }
-        }
-        if (abs(inputs.stick_x) < 10) {
-            float target_suzanne_angle =
-                fm_roundf(suzanne_angle /
-                          (2 * FM_PI / tower->segments_per_floor)) *
-                (2 * FM_PI / tower->segments_per_floor);
-            suzanne_angle = my_lerp_angle(suzanne_angle, target_suzanne_angle,
-                                          0.1f * 60 * dt);
-        }
-
-        // Going through corridors
-        if (pressed.a) {
-            int floor = (int)fm_roundf(suzanne_height);
-            if (floor >= 0 && floor < tower->n_floors) {
-                int corridor = tower->floors[floor].corridor;
-                if (corridor != -1) {
-                    int segment = (int)fm_roundf(
-                                      suzanne_angle /
-                                      (2 * FM_PI / tower->segments_per_floor)) %
-                                  tower->segments_per_floor;
-                    if (corridor == segment ||
-                        corridor + tower->segments_per_floor / 2 == segment) {
-                        suzanne_angle += FM_PI;
-                    }
-                }
-            }
-        }
-
-        if (pressed.z) {
-            rebuild_tower = true;
-        }
-
-        // Vertical movement
-        suzanne_height += inputs.stick_y / 60.0f * dt;
-        if (suzanne_height < -0.3f) {
-            suzanne_height = -0.3f;
-        }
-        if (suzanne_height > tower->n_floors - 1 + 0.3f) {
-            suzanne_height = tower->n_floors - 1 + 0.3f;
-        }
-        {
-            int segment =
-                (int)fm_roundf(suzanne_angle /
-                               (2 * FM_PI / tower->segments_per_floor)) %
-                tower->segments_per_floor;
-            int floor = (int)fm_roundf(suzanne_height);
-            if (floor >= 0 && floor < tower->n_floors) {
-                if (tower->floors[floor].wall_flags[segment] & WF_HORIZONTAL) {
-                    float limit = floor + 0.3f;
-                    if (suzanne_height > limit) {
-                        suzanne_height = limit;
-                    }
-                }
-                if (floor > 0 && (tower->floors[floor - 1].wall_flags[segment] &
-                                  WF_HORIZONTAL)) {
-                    float limit = floor - 0.3f;
-                    if (suzanne_height < limit) {
-                        suzanne_height = limit;
-                    }
-                }
-            }
-        }
-        if (abs(inputs.stick_y) < 10) {
-            float target_suzanne_height = fm_roundf(suzanne_height);
-            suzanne_height =
-                fm_lerp(suzanne_height, target_suzanne_height, 0.1f * 60 * dt);
-        }
-
-        /*
-         * Camera/view handling
-         */
-
-        camera_angle =
-            my_lerp_angle(camera_angle, suzanne_angle, 0.1f * 60 * dt);
-        camera_at_height =
-            my_lerp_angle(camera_at_height, suzanne_height, 0.2f * 60 * dt);
-        camera_eye_height =
-            my_lerp_angle(camera_eye_height, camera_at_height, 0.1f * 60 * dt);
-
-        fm_vec3_t eye;
-        fm_sincosf(camera_angle, &eye.y, &eye.x);
-        eye.z = 0.0f;
-        fm_vec3_scale(&eye, &eye, 2.0f);
-        eye.z = camera_eye_height;
-        fm_vec3_t target = {{0, 0, camera_at_height}};
         fm_mat4_t mat_view;
-        fm_mat4_lookat(&mat_view, &eye, &target, &(fm_vec3_t){{0, 0, 1}});
+
+        if (is_climbing_tower) {
+            /*
+             * Input and collision handling
+             */
+
+            // Horizontal movement
+            tower_climb_ctx.suzanne_angle +=
+                inputs.stick_x / 60.0f * FM_DEG2RAD(100) * dt;
+            tower_climb_ctx.suzanne_angle =
+                fm_wrap_angle(tower_climb_ctx.suzanne_angle);
+            {
+                int segment =
+                    (int)fm_roundf(tower_climb_ctx.suzanne_angle /
+                                   (2 * FM_PI / tower->segments_per_floor)) %
+                    tower->segments_per_floor;
+                int floor = (int)fm_roundf(tower_climb_ctx.suzanne_height);
+                if (floor >= 0 && floor < tower->n_floors) {
+                    if (tower->floors[floor].wall_flags[segment] &
+                        WF_VERTICAL) {
+                        float limit = (segment * 2 * FM_PI - FM_DEG2RAD(50)) /
+                                      tower->segments_per_floor;
+                        if (fm_wrap_angle(tower_climb_ctx.suzanne_angle -
+                                          limit) >= FM_PI) {
+                            tower_climb_ctx.suzanne_angle = limit;
+                        }
+                    }
+                    if (tower->floors[floor]
+                            .wall_flags[(segment + 1) %
+                                        tower->segments_per_floor] &
+                        WF_VERTICAL) {
+                        float limit = (segment * 2 * FM_PI + FM_DEG2RAD(50)) /
+                                      tower->segments_per_floor;
+                        if (fm_wrap_angle(tower_climb_ctx.suzanne_angle -
+                                          limit) < FM_PI) {
+                            tower_climb_ctx.suzanne_angle = limit;
+                        }
+                    }
+                }
+            }
+            if (abs(inputs.stick_x) < 10) {
+                float target_suzanne_angle =
+                    fm_roundf(tower_climb_ctx.suzanne_angle /
+                              (2 * FM_PI / tower->segments_per_floor)) *
+                    (2 * FM_PI / tower->segments_per_floor);
+                tower_climb_ctx.suzanne_angle =
+                    my_lerp_angle(tower_climb_ctx.suzanne_angle,
+                                  target_suzanne_angle, 0.1f * 60 * dt);
+            }
+
+            // Going through corridors
+            if (pressed.a) {
+                int floor = (int)fm_roundf(tower_climb_ctx.suzanne_height);
+                if (floor >= 0 && floor < tower->n_floors) {
+                    int corridor = tower->floors[floor].corridor;
+                    if (corridor != -1) {
+                        int segment =
+                            (int)fm_roundf(
+                                tower_climb_ctx.suzanne_angle /
+                                (2 * FM_PI / tower->segments_per_floor)) %
+                            tower->segments_per_floor;
+                        if (corridor == segment ||
+                            corridor + tower->segments_per_floor / 2 ==
+                                segment) {
+                            tower_climb_ctx.suzanne_angle += FM_PI;
+                        }
+                    }
+                }
+            }
+
+            if (pressed.z) {
+                rebuild_tower = true;
+            }
+
+            // Vertical movement
+            tower_climb_ctx.suzanne_height += inputs.stick_y / 60.0f * dt;
+            if (tower_climb_ctx.suzanne_height < -0.3f) {
+                tower_climb_ctx.suzanne_height = -0.3f;
+            }
+            if (tower_climb_ctx.suzanne_height > tower->n_floors - 1 + 0.3f) {
+                tower_climb_ctx.suzanne_height = tower->n_floors - 1 + 0.3f;
+            }
+            {
+                int segment =
+                    (int)fm_roundf(tower_climb_ctx.suzanne_angle /
+                                   (2 * FM_PI / tower->segments_per_floor)) %
+                    tower->segments_per_floor;
+                int floor = (int)fm_roundf(tower_climb_ctx.suzanne_height);
+                if (floor >= 0 && floor < tower->n_floors) {
+                    if (tower->floors[floor].wall_flags[segment] &
+                        WF_HORIZONTAL) {
+                        float limit = floor + 0.3f;
+                        if (tower_climb_ctx.suzanne_height > limit) {
+                            tower_climb_ctx.suzanne_height = limit;
+                        }
+                    }
+                    if (floor > 0 &&
+                        (tower->floors[floor - 1].wall_flags[segment] &
+                         WF_HORIZONTAL)) {
+                        float limit = floor - 0.3f;
+                        if (tower_climb_ctx.suzanne_height < limit) {
+                            tower_climb_ctx.suzanne_height = limit;
+                        }
+                    }
+                }
+            }
+            if (abs(inputs.stick_y) < 10) {
+                float target_suzanne_height =
+                    fm_roundf(tower_climb_ctx.suzanne_height);
+                tower_climb_ctx.suzanne_height =
+                    fm_lerp(tower_climb_ctx.suzanne_height,
+                            target_suzanne_height, 0.1f * 60 * dt);
+            }
+
+            if (pressed.b) {
+                is_climbing_tower = false;
+            }
+
+            /*
+             * Camera/view handling
+             */
+
+            tower_climb_ctx.camera_angle =
+                my_lerp_angle(tower_climb_ctx.camera_angle,
+                              tower_climb_ctx.suzanne_angle, 0.1f * 60 * dt);
+            tower_climb_ctx.camera_at_height =
+                my_lerp_angle(tower_climb_ctx.camera_at_height,
+                              tower_climb_ctx.suzanne_height, 0.2f * 60 * dt);
+            tower_climb_ctx.camera_eye_height =
+                my_lerp_angle(tower_climb_ctx.camera_eye_height,
+                              tower_climb_ctx.camera_at_height, 0.1f * 60 * dt);
+
+            fm_vec3_t eye;
+            fm_sincosf(tower_climb_ctx.camera_angle, &eye.y, &eye.x);
+            eye.z = 0.0f;
+            fm_vec3_scale(&eye, &eye, 2.0f);
+            eye.z = tower_climb_ctx.camera_eye_height;
+            fm_vec3_t target = {{0, 0, tower_climb_ctx.camera_at_height}};
+            fm_mat4_lookat(&mat_view, &eye, &target, &(fm_vec3_t){{0, 0, 1}});
+        } else {
+            fm_mat3_t mat;
+            fm_mat3_identity(&mat);
+            fm_mat3_rotate(&mat, -free_roam_ctx.camera_yaw);
+            fm_vec3_t d;
+            float f = 1 / 60.0f * 0.1f * 60 * dt;
+            fm_mat3_mul_vec2(
+                &d, &mat,
+                &(fm_vec2_t){{inputs.stick_x * f, inputs.stick_y * f}});
+            free_roam_ctx.suzanne_x += d.x;
+            free_roam_ctx.suzanne_y += d.y;
+            if (fm_vec2_len(&(fm_vec2_t){{inputs.stick_x, inputs.stick_y}}) >
+                20) {
+                // atan2(stick_y, stick_x) gives an angle from +x (rightward)
+                // subtract pi/2 to get an angle from +y (forward)
+                free_roam_ctx.suzanne_yaw = fm_wrap_angle(
+                    free_roam_ctx.camera_yaw +
+                    fm_atan2f(inputs.stick_y, inputs.stick_x) - FM_PI / 2);
+                free_roam_ctx.suzanne_yaw_idle_time = 0.0f;
+            } else {
+                free_roam_ctx.suzanne_yaw_idle_time += dt;
+            }
+
+            if (pressed.a) {
+                is_climbing_tower = true;
+            }
+
+            /*
+             * Camera/view handling
+             */
+
+            if (fabsf(fm_wrap_angle(free_roam_ctx.camera_yaw -
+                                    free_roam_ctx.suzanne_yaw) -
+                      FM_PI) > FM_DEG2RAD(60) ||
+                free_roam_ctx.suzanne_yaw_idle_time > 1) {
+                free_roam_ctx.camera_yaw = fm_wrap_angle(my_lerp_angle_maxed(
+                    free_roam_ctx.camera_yaw, free_roam_ctx.suzanne_yaw,
+                    0.1f * 60 * dt, FM_DEG2RAD(180.0f / 60) * 60 * dt));
+            }
+
+            fm_vec3_t target = {
+                {free_roam_ctx.suzanne_x, free_roam_ctx.suzanne_y, 0.0f}};
+            fm_vec3_t eyeToTarget;
+            // camera_yaw = 0 -> (0,1) (forward)
+            // camera_yaw = pi/2 -> (-1,0) (leftward)
+            fm_sincosf(free_roam_ctx.camera_yaw + FM_PI / 2, &eyeToTarget.y,
+                       &eyeToTarget.x);
+            eyeToTarget.z = 0.0f;
+            fm_vec3_scale(&eyeToTarget, &eyeToTarget, 2.0f);
+            fm_vec3_t eye;
+            fm_vec3_sub(&eye, &target, &eyeToTarget);
+            fm_mat4_lookat(&mat_view, &eye, &target, &(fm_vec3_t){{0, 0, 1}});
+        }
 
         /*
          * Drawing
@@ -505,13 +658,29 @@ int main(void) {
         {
             fm_mat4_t mat_model;
             fm_mat4_identity(&mat_model);
-            fm_vec3_t translate = {{0.0f, -1.1f, suzanne_height}};
-            fm_mat4_translate(&mat_model, &translate);
-            fm_quat_t rotation;
-            fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
-                                   suzanne_angle + FM_PI / 2);
-            fm_mat4_rotate(&mat_model, &rotation);
-            fm_mat4_scale(&mat_model, &(fm_vec3_t){{0.2f, 0.2f, 0.2f}});
+            if (is_climbing_tower) {
+                fm_mat4_scale_fixed(&mat_model,
+                                    &(fm_vec3_t){{0.2f, 0.2f, 0.2f}});
+                fm_vec3_t translate = {
+                    {0.0f, -1.1f, tower_climb_ctx.suzanne_height}};
+                fm_mat4_translate(&mat_model, &translate);
+                fm_quat_t rotation;
+                fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
+                                       tower_climb_ctx.suzanne_angle +
+                                           FM_PI / 2);
+                fm_mat4_rotate(&mat_model, &rotation);
+            } else {
+                fm_mat4_scale_fixed(&mat_model,
+                                    &(fm_vec3_t){{0.2f, 0.2f, 0.2f}});
+                fm_quat_t rotation;
+                // Suzanne model looks towards -y (backwards)
+                fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
+                                       free_roam_ctx.suzanne_yaw + FM_PI);
+                fm_mat4_rotate(&mat_model, &rotation);
+                fm_vec3_t translate = {
+                    {free_roam_ctx.suzanne_x, free_roam_ctx.suzanne_y, 0.0f}};
+                fm_mat4_translate(&mat_model, &translate);
+            }
             mgfx_matrices_t *ud_matrices =
                 build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
 
@@ -549,6 +718,75 @@ int main(void) {
 
             add_used_primitive(gfx_ctx, tower_walls_primitive);
             draw_primitive(tower_walls_primitive);
+        }
+
+        mg_pipeline_bind(textured_pipeline);
+
+        // TODO is this needed again?
+        mg_set_viewport(&(mg_viewport_t){
+            .x = 0,
+            .y = 0,
+            .width = display_get_width(),
+            .height = display_get_height(),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        });
+
+        mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
+
+        mg_set_geometry_flags(MG_GEOMETRY_FLAGS_TEX_ENABLED |
+                              MG_GEOMETRY_FLAGS_Z_ENABLED);
+
+        mg_uniform_load(textured_u_fog, &textured_ud_fog);
+        mg_uniform_load(textured_u_texturing, &textured_ud_texturing);
+
+        rdpq_mode_combiner(RDPQ_COMBINER_TEX);
+        rdpq_mode_persp(true);
+        rdpq_mode_filter(FILTER_POINT);
+        static surface_t texsurf_buf;
+        static surface_t *texsurf = NULL;
+        if (texsurf == NULL) {
+            // texsurf = surface_make_linear(main, FMT_RGBA16, 32, 32);
+            texsurf_buf = surface_alloc(FMT_RGBA16, 32, 32);
+            texsurf = &texsurf_buf;
+            for (int i = 0; i < 32; i++) {
+                for (int j = 0; j < 32; j++) {
+                    ((uint16_t *)texsurf->buffer)[i * 32 + j] =
+                        (i + j) % 2 == 0 ? 0xF801 : 0xFFFF;
+                }
+            }
+            data_cache_writeback_invalidate_all();
+        }
+        rdpq_tex_upload(TILE0, texsurf,
+                        &(rdpq_texparms_t){
+                            .s.repeats = REPEAT_INFINITE,
+                            .t.repeats = REPEAT_INFINITE,
+#define b 4
+                            .s.scale_log = b,
+                            .t.scale_log = b,
+                        });
+        {
+            fm_mat4_t mat_model;
+            fm_mat4_identity(&mat_model);
+            float s = 1.0f;
+            fm_mat4_scale_fixed(&mat_model, &(fm_vec3_t){{s, s, s}});
+            fm_mat4_translate(&mat_model, &(fm_vec3_t){{0, 0, -0.5f}});
+            mgfx_matrices_t *textured_ud_matrices =
+                build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
+
+            mg_uniform_load(textured_u_matrices, textured_ud_matrices);
+
+#define a (0x20 << b)
+            static struct textured_vertex verts[] = {
+                {MGFX_POS(-10, -10, 0), {0, 0}},
+                {MGFX_POS(-10, 10, 0), {0, a * 32}},
+                {MGFX_POS(10, 10, 0), {a * 32, a * 32}},
+                {MGFX_POS(10, -10, 0), {a * 32, 0}},
+            };
+            mg_bind_vertex_buffer(verts);
+            mg_load_vertices(0, 0, 4);
+            mg_draw_triangle(0, 1, 2);
+            mg_draw_triangle(0, 3, 2);
         }
 
         // Print the seed
