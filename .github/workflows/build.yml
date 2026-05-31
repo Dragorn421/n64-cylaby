@@ -1,0 +1,35 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: Install N64 toolchain
+      run: |
+        curl -L -o gcc-toolchain-mips64-x86_64.deb https://github.com/DragonMinded/libdragon/releases/download/toolchain-continuous-prerelease/gcc-toolchain-mips64-x86_64.deb
+        sudo dpkg -i gcc-toolchain-mips64-x86_64.deb
+
+    - name: Build libdragon
+      run: N64_GCCPREFIX=/opt/libdragon ./build_libdragon.sh
+
+    - name: Build cylaby
+      run: N64_GCCPREFIX=/opt/libdragon make -j$(nproc)
+
+    - name: Upload cylaby.z64
+      uses: actions/upload-artifact@v7
+      with:
+        name: cylaby.z64
+        path: cylaby.z64
+
+    - name: Upload build folder
+      uses: actions/upload-artifact@v7
+      with:
+        name: build
+        path: build
