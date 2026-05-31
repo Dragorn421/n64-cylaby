@@ -321,9 +321,11 @@ int main(void) {
     data_cache_writeback_invalidate_all();
 
     fm_mat4_t mat_projection;
+#define Z_NEAR 0.1f
+#define Z_FAR 10.0f
     mg_mat4_perspective(&mat_projection, FM_DEG2RAD(60),
-                        (float)display_get_width() / display_get_height(), 0.1f,
-                        10.0f);
+                        (float)display_get_width() / display_get_height(),
+                        Z_NEAR, Z_FAR);
 
     struct {
         float suzanne_x;
@@ -695,6 +697,8 @@ int main(void) {
             .height = display_get_height(),
             .minDepth = 0.0f,
             .maxDepth = 1.0f,
+            .z_near = Z_NEAR,
+            .z_far = Z_FAR,
         });
 
         mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_BACK});
@@ -793,6 +797,8 @@ int main(void) {
             .height = display_get_height(),
             .minDepth = 0.0f,
             .maxDepth = 1.0f,
+            .z_near = Z_NEAR,
+            .z_far = Z_FAR,
         });
 
         mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
