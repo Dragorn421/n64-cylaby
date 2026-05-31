@@ -40,6 +40,8 @@ struct GfxCtx {
      */
     struct primitive *used_primitives[6];
     int n_used_primitives;
+    rspq_block_t *used_blocks[6];
+    int n_used_blocks;
 };
 
 /**
@@ -90,6 +92,11 @@ mgfx_matrices_t *build_matrices(struct GfxCtx *gfx_ctx,
 void add_used_primitive(struct GfxCtx *gfx_ctx, struct primitive *primitive) {
     assert(gfx_ctx->n_used_primitives < ARRAY_COUNT(gfx_ctx->used_primitives));
     gfx_ctx->used_primitives[gfx_ctx->n_used_primitives++] = primitive;
+}
+
+void add_used_block(struct GfxCtx *gfx_ctx, rspq_block_t *block) {
+    assert(gfx_ctx->n_used_blocks < ARRAY_COUNT(gfx_ctx->used_blocks));
+    gfx_ctx->used_blocks[gfx_ctx->n_used_blocks++] = block;
 }
 
 void draw_primitive(struct primitive *primitive) {
@@ -172,6 +179,64 @@ void defered_primitives_free_free(struct defered_primitives_free_ctx *ctx,
         }
     }
     ctx->has_primitives_to_free = !all_freed;
+}
+
+// copypaste of the defered_primitives_free system for blocks.
+struct defered_blocks_free_ctx {
+    struct {
+        rspq_block_t *block;
+    } blocks_to_free[6];
+    bool has_blocks_to_free;
+};
+
+void defered_blocks_free_init_ctx(struct defered_blocks_free_ctx *ctx) {
+    for (int i = 0; i < ARRAY_COUNT(ctx->blocks_to_free); i++) {
+        ctx->blocks_to_free[i].block = NULL;
+    }
+    ctx->has_blocks_to_free = false;
+}
+
+void defered_blocks_free_add(struct defered_blocks_free_ctx *ctx,
+                             rspq_block_t *block) {
+    bool is_full = true;
+    for (int i = 0; i < ARRAY_COUNT(ctx->blocks_to_free); i++) {
+        if (ctx->blocks_to_free[i].block == NULL) {
+            ctx->blocks_to_free[i].block = block;
+            is_full = false;
+            break;
+        }
+    }
+    assert(!is_full);
+    ctx->has_blocks_to_free = true;
+}
+
+void defered_blocks_free_free(struct defered_blocks_free_ctx *ctx,
+                              struct GfxCtx *gfx_ctx_buf, int n_gfx_ctx) {
+    if (!ctx->has_blocks_to_free) {
+        return;
+    }
+    bool all_freed = true;
+    for (int i = 0; i < ARRAY_COUNT(ctx->blocks_to_free); i++) {
+        if (ctx->blocks_to_free[i].block != NULL) {
+            bool is_block_used = false;
+            for (int j = 0; j < n_gfx_ctx; j++) {
+                struct GfxCtx *gfx_ctx = &gfx_ctx_buf[j];
+                for (int k = 0; k < gfx_ctx->n_used_blocks; k++) {
+                    if (gfx_ctx->used_blocks[k] ==
+                        ctx->blocks_to_free[i].block) {
+                        is_block_used = true;
+                    }
+                }
+            }
+            if (!is_block_used) {
+                rspq_block_free(ctx->blocks_to_free[i].block);
+                ctx->blocks_to_free[i].block = NULL;
+            } else {
+                all_freed = false;
+            }
+        }
+    }
+    ctx->has_blocks_to_free = !all_freed;
 }
 
 // like fm_lerp_angle but working properly, for until my fm fixes make it
@@ -349,11 +414,16 @@ int main(void) {
     struct defered_primitives_free_ctx defered_primitives_free_ctx;
     defered_primitives_free_init_ctx(&defered_primitives_free_ctx);
 
+    struct defered_blocks_free_ctx defered_blocks_free_ctx;
+    defered_blocks_free_init_ctx(&defered_blocks_free_ctx);
+
     struct {
         unsigned int seed;
         struct tower *tower;
         struct primitive *tower_primitive;
         struct primitive *tower_walls_primitive;
+        rspq_block_t *tower_block;
+        rspq_block_t *tower_walls_block;
         bool rebuild_tower;
         fm_vec3_t pos;
     } towers[3] = {0};
@@ -365,6 +435,10 @@ int main(void) {
     }
     int i_cur_tower = 0;
 
+    rspq_block_begin();
+    draw_primitive(&Suzanne_0);
+    rspq_block_t *suzanne_block = rspq_block_end();
+
     while (true) {
         // get and initialize GfxCtx
         struct GfxCtx *gfx_ctx = &gfx_ctx_buf[i_gfx_ctx];
@@ -372,6 +446,7 @@ int main(void) {
         i_gfx_ctx %= display_get_num_buffers();
         gfx_ctx->i_ud_mat_buf = 0;
         gfx_ctx->n_used_primitives = 0;
+        gfx_ctx->n_used_blocks = 0;
 
         for (int i = 0; i < ARRAY_COUNT(towers); i++) {
             if (!towers[i].rebuild_tower) {
@@ -392,6 +467,16 @@ int main(void) {
                                             towers[i].tower_walls_primitive,
                                             geom_mesh_free_primitive);
                 towers[i].tower_walls_primitive = NULL;
+            }
+            if (towers[i].tower_block != NULL) {
+                defered_blocks_free_add(&defered_blocks_free_ctx,
+                                        towers[i].tower_block);
+                towers[i].tower_block = NULL;
+            }
+            if (towers[i].tower_walls_block != NULL) {
+                defered_blocks_free_add(&defered_blocks_free_ctx,
+                                        towers[i].tower_walls_block);
+                towers[i].tower_walls_block = NULL;
             }
 
             // malloc the tower data, with unset walls
@@ -427,6 +512,13 @@ int main(void) {
             assert(towers[i].tower_walls_primitive != NULL);
 
             data_cache_writeback_invalidate_all();
+
+            rspq_block_begin();
+            draw_primitive(towers[i].tower_primitive);
+            towers[i].tower_block = rspq_block_end();
+            rspq_block_begin();
+            draw_primitive(towers[i].tower_walls_primitive);
+            towers[i].tower_walls_block = rspq_block_end();
 
             towers[i].rebuild_tower = false;
         }
@@ -743,7 +835,7 @@ int main(void) {
 
             mg_uniform_load(u_matrices, ud_matrices);
 
-            draw_primitive(&Suzanne_0);
+            rspq_block_run(suzanne_block);
         }
 
         for (int i = 0; i < ARRAY_COUNT(towers); i++) {
@@ -764,7 +856,8 @@ int main(void) {
                 mg_uniform_load(u_matrices, ud_matrices);
 
                 add_used_primitive(gfx_ctx, towers[i].tower_primitive);
-                draw_primitive(towers[i].tower_primitive);
+                add_used_block(gfx_ctx, towers[i].tower_block);
+                rspq_block_run(towers[i].tower_block);
             }
 
             // Draw the tower walls
@@ -783,7 +876,8 @@ int main(void) {
                 mg_uniform_load(u_matrices, ud_matrices);
 
                 add_used_primitive(gfx_ctx, towers[i].tower_walls_primitive);
-                draw_primitive(towers[i].tower_walls_primitive);
+                add_used_block(gfx_ctx, towers[i].tower_walls_block);
+                rspq_block_run(towers[i].tower_walls_block);
             }
         }
 
@@ -869,5 +963,7 @@ int main(void) {
 
         defered_primitives_free_free(&defered_primitives_free_ctx, gfx_ctx_buf,
                                      display_get_num_buffers());
+        defered_blocks_free_free(&defered_blocks_free_ctx, gfx_ctx_buf,
+                                 display_get_num_buffers());
     }
 }
