@@ -866,18 +866,6 @@ int main(void) {
 
         mg_pipeline_bind(textured_pipeline);
 
-        // TODO is this needed again?
-        mg_set_viewport(&(mg_viewport_t){
-            .x = 0,
-            .y = 0,
-            .width = display_get_width(),
-            .height = display_get_height(),
-            .minDepth = 0.0f,
-            .maxDepth = 1.0f,
-            .z_near = Z_NEAR,
-            .z_far = Z_FAR,
-        });
-
         mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
 
         mg_set_geometry_flags(MG_GEOMETRY_FLAGS_TEX_ENABLED |
