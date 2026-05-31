@@ -29,7 +29,7 @@ struct GfxCtx {
      * This buffer holds matrices uniforms generated every frame.
      * The next free index in the buffer is stored in i_ud_mat_buf.
      */
-    mgfx_matrices_t ud_mat_buf[5];
+    mgfx_matrices_t ud_mat_buf[10];
     int i_ud_mat_buf;
     /**
      * This buffer keeps track of the (dynamically allocated) primitives used by
@@ -38,7 +38,7 @@ struct GfxCtx {
      * The amount of valid entries (or equivalently the next free index) is
      * stored in n_used_primitives.
      */
-    struct primitive *used_primitives[2];
+    struct primitive *used_primitives[6];
     int n_used_primitives;
 };
 
@@ -347,11 +347,21 @@ int main(void) {
     struct defered_primitives_free_ctx defered_primitives_free_ctx;
     defered_primitives_free_init_ctx(&defered_primitives_free_ctx);
 
-    unsigned int seed;
-    struct tower *tower = NULL;
-    struct primitive *tower_primitive = NULL;
-    struct primitive *tower_walls_primitive = NULL;
-    bool rebuild_tower = true;
+    struct {
+        unsigned int seed;
+        struct tower *tower;
+        struct primitive *tower_primitive;
+        struct primitive *tower_walls_primitive;
+        bool rebuild_tower;
+        fm_vec3_t pos;
+    } towers[3] = {0};
+    towers[0].pos = (fm_vec3_t){{3, 0, 0}};
+    towers[1].pos = (fm_vec3_t){{-3, 0, 0}};
+    towers[2].pos = (fm_vec3_t){{0, 3, 0}};
+    for (int i = 0; i < ARRAY_COUNT(towers); i++) {
+        towers[i].rebuild_tower = true;
+    }
+    int i_cur_tower = 0;
 
     while (true) {
         // get and initialize GfxCtx
@@ -361,54 +371,62 @@ int main(void) {
         gfx_ctx->i_ud_mat_buf = 0;
         gfx_ctx->n_used_primitives = 0;
 
-        if (rebuild_tower) {
-            if (tower != NULL) {
-                free_tower(tower);
-                tower = NULL;
+        for (int i = 0; i < ARRAY_COUNT(towers); i++) {
+            if (!towers[i].rebuild_tower) {
+                continue;
             }
-            if (tower_primitive != NULL) {
-                defered_primitives_free_add(&defered_primitives_free_ctx,
-                                            tower_primitive,
-                                            geom_mesh_free_primitive);
-                tower_primitive = NULL;
+            if (towers[i].tower != NULL) {
+                free_tower(towers[i].tower);
+                towers[i].tower = NULL;
             }
-            if (tower_walls_primitive != NULL) {
+            if (towers[i].tower_primitive != NULL) {
                 defered_primitives_free_add(&defered_primitives_free_ctx,
-                                            tower_walls_primitive,
+                                            towers[i].tower_primitive,
                                             geom_mesh_free_primitive);
-                tower_walls_primitive = NULL;
+                towers[i].tower_primitive = NULL;
+            }
+            if (towers[i].tower_walls_primitive != NULL) {
+                defered_primitives_free_add(&defered_primitives_free_ctx,
+                                            towers[i].tower_walls_primitive,
+                                            geom_mesh_free_primitive);
+                towers[i].tower_walls_primitive = NULL;
             }
 
             // malloc the tower data, with unset walls
-            tower =
+            towers[i].tower =
                 malloc_tower(5, 10, WF_VERTICAL_UNSET | WF_HORIZONTAL_UNSET);
-            assert(tower != NULL);
+            assert(towers[i].tower != NULL);
 
-            seed = (unsigned int)getentropy32() + (unsigned int)get_ticks();
-            srand(seed);
+            towers[i].seed =
+                (unsigned int)getentropy32() + (unsigned int)get_ticks();
+            srand(towers[i].seed);
 
             // randomly add corridors
             int n_corridors = 1 + rand() % 2;
             if (rand() % 3 == 0) {
                 n_corridors += 1;
             }
-            for (int i = 0; i < n_corridors; i++) {
-                tower->floors[rand() % tower->n_floors].corridor =
-                    rand() % (tower->segments_per_floor / 2);
+            for (int k = 0; k < n_corridors; k++) {
+                towers[i]
+                    .tower->floors[rand() % towers[i].tower->n_floors]
+                    .corridor =
+                    rand() % (towers[i].tower->segments_per_floor / 2);
             }
 
             // randomly build walls
-            build_tower_walls(tower);
+            build_tower_walls(towers[i].tower);
 
             // Generate the primitives that will be drawn
-            tower_primitive = generate_tower_geometry(tower);
-            assert(tower_primitive != NULL);
-            tower_walls_primitive = generate_tower_walls_geometry(tower);
-            assert(tower_walls_primitive != NULL);
+            towers[i].tower_primitive =
+                generate_tower_geometry(towers[i].tower);
+            assert(towers[i].tower_primitive != NULL);
+            towers[i].tower_walls_primitive =
+                generate_tower_walls_geometry(towers[i].tower);
+            assert(towers[i].tower_walls_primitive != NULL);
 
             data_cache_writeback_invalidate_all();
 
-            rebuild_tower = false;
+            towers[i].rebuild_tower = false;
         }
 
         surface_t *surf = display_get();
@@ -432,26 +450,32 @@ int main(void) {
                 fm_wrap_angle(tower_climb_ctx.suzanne_angle);
             {
                 int segment =
-                    (int)fm_roundf(tower_climb_ctx.suzanne_angle /
-                                   (2 * FM_PI / tower->segments_per_floor)) %
-                    tower->segments_per_floor;
+                    (int)fm_roundf(
+                        tower_climb_ctx.suzanne_angle /
+                        (2 * FM_PI /
+                         towers[i_cur_tower].tower->segments_per_floor)) %
+                    towers[i_cur_tower].tower->segments_per_floor;
                 int floor = (int)fm_roundf(tower_climb_ctx.suzanne_height);
-                if (floor >= 0 && floor < tower->n_floors) {
-                    if (tower->floors[floor].wall_flags[segment] &
+                if (floor >= 0 && floor < towers[i_cur_tower].tower->n_floors) {
+                    if (towers[i_cur_tower]
+                            .tower->floors[floor]
+                            .wall_flags[segment] &
                         WF_VERTICAL) {
-                        float limit = (segment * 2 * FM_PI - FM_DEG2RAD(50)) /
-                                      tower->segments_per_floor;
+                        float limit =
+                            (segment * 2 * FM_PI - FM_DEG2RAD(50)) /
+                            towers[i_cur_tower].tower->segments_per_floor;
                         if (fm_wrap_angle(tower_climb_ctx.suzanne_angle -
                                           limit) >= FM_PI) {
                             tower_climb_ctx.suzanne_angle = limit;
                         }
                     }
-                    if (tower->floors[floor]
-                            .wall_flags[(segment + 1) %
-                                        tower->segments_per_floor] &
+                    if (towers[i_cur_tower].tower->floors[floor].wall_flags
+                            [(segment + 1) %
+                             towers[i_cur_tower].tower->segments_per_floor] &
                         WF_VERTICAL) {
-                        float limit = (segment * 2 * FM_PI + FM_DEG2RAD(50)) /
-                                      tower->segments_per_floor;
+                        float limit =
+                            (segment * 2 * FM_PI + FM_DEG2RAD(50)) /
+                            towers[i_cur_tower].tower->segments_per_floor;
                         if (fm_wrap_angle(tower_climb_ctx.suzanne_angle -
                                           limit) < FM_PI) {
                             tower_climb_ctx.suzanne_angle = limit;
@@ -462,8 +486,9 @@ int main(void) {
             if (abs(inputs.stick_x) < 10) {
                 float target_suzanne_angle =
                     fm_roundf(tower_climb_ctx.suzanne_angle /
-                              (2 * FM_PI / tower->segments_per_floor)) *
-                    (2 * FM_PI / tower->segments_per_floor);
+                              (2 * FM_PI /
+                               towers[i_cur_tower].tower->segments_per_floor)) *
+                    (2 * FM_PI / towers[i_cur_tower].tower->segments_per_floor);
                 tower_climb_ctx.suzanne_angle =
                     my_lerp_angle(tower_climb_ctx.suzanne_angle,
                                   target_suzanne_angle, 0.1f * 60 * dt);
@@ -472,16 +497,20 @@ int main(void) {
             // Going through corridors
             if (pressed.a) {
                 int floor = (int)fm_roundf(tower_climb_ctx.suzanne_height);
-                if (floor >= 0 && floor < tower->n_floors) {
-                    int corridor = tower->floors[floor].corridor;
+                if (floor >= 0 && floor < towers[i_cur_tower].tower->n_floors) {
+                    int corridor =
+                        towers[i_cur_tower].tower->floors[floor].corridor;
                     if (corridor != -1) {
                         int segment =
-                            (int)fm_roundf(
-                                tower_climb_ctx.suzanne_angle /
-                                (2 * FM_PI / tower->segments_per_floor)) %
-                            tower->segments_per_floor;
+                            (int)fm_roundf(tower_climb_ctx.suzanne_angle /
+                                           (2 * FM_PI /
+                                            towers[i_cur_tower]
+                                                .tower->segments_per_floor)) %
+                            towers[i_cur_tower].tower->segments_per_floor;
                         if (corridor == segment ||
-                            corridor + tower->segments_per_floor / 2 ==
+                            corridor + towers[i_cur_tower]
+                                               .tower->segments_per_floor /
+                                           2 ==
                                 segment) {
                             tower_climb_ctx.suzanne_angle += FM_PI;
                         }
@@ -490,7 +519,7 @@ int main(void) {
             }
 
             if (pressed.z) {
-                rebuild_tower = true;
+                towers[i_cur_tower].rebuild_tower = true;
             }
 
             // Vertical movement
@@ -498,26 +527,33 @@ int main(void) {
             if (tower_climb_ctx.suzanne_height < -0.3f) {
                 tower_climb_ctx.suzanne_height = -0.3f;
             }
-            if (tower_climb_ctx.suzanne_height > tower->n_floors - 1 + 0.3f) {
-                tower_climb_ctx.suzanne_height = tower->n_floors - 1 + 0.3f;
+            if (tower_climb_ctx.suzanne_height >
+                towers[i_cur_tower].tower->n_floors - 1 + 0.3f) {
+                tower_climb_ctx.suzanne_height =
+                    towers[i_cur_tower].tower->n_floors - 1 + 0.3f;
             }
             {
                 int segment =
-                    (int)fm_roundf(tower_climb_ctx.suzanne_angle /
-                                   (2 * FM_PI / tower->segments_per_floor)) %
-                    tower->segments_per_floor;
+                    (int)fm_roundf(
+                        tower_climb_ctx.suzanne_angle /
+                        (2 * FM_PI /
+                         towers[i_cur_tower].tower->segments_per_floor)) %
+                    towers[i_cur_tower].tower->segments_per_floor;
                 int floor = (int)fm_roundf(tower_climb_ctx.suzanne_height);
-                if (floor >= 0 && floor < tower->n_floors) {
-                    if (tower->floors[floor].wall_flags[segment] &
+                if (floor >= 0 && floor < towers[i_cur_tower].tower->n_floors) {
+                    if (towers[i_cur_tower]
+                            .tower->floors[floor]
+                            .wall_flags[segment] &
                         WF_HORIZONTAL) {
                         float limit = floor + 0.3f;
                         if (tower_climb_ctx.suzanne_height > limit) {
                             tower_climb_ctx.suzanne_height = limit;
                         }
                     }
-                    if (floor > 0 &&
-                        (tower->floors[floor - 1].wall_flags[segment] &
-                         WF_HORIZONTAL)) {
+                    if (floor > 0 && (towers[i_cur_tower]
+                                          .tower->floors[floor - 1]
+                                          .wall_flags[segment] &
+                                      WF_HORIZONTAL)) {
                         float limit = floor - 0.3f;
                         if (tower_climb_ctx.suzanne_height < limit) {
                             tower_climb_ctx.suzanne_height = limit;
@@ -557,6 +593,8 @@ int main(void) {
             fm_vec3_scale(&eye, &eye, 2.0f);
             eye.z = tower_climb_ctx.camera_eye_height;
             fm_vec3_t target = {{0, 0, tower_climb_ctx.camera_at_height}};
+            fm_vec3_add(&eye, &eye, &towers[i_cur_tower].pos);
+            fm_vec3_add(&target, &target, &towers[i_cur_tower].pos);
             fm_mat4_lookat(&mat_view, &eye, &target, &(fm_vec3_t){{0, 0, 1}});
         } else {
             fm_mat3_t mat;
@@ -583,6 +621,20 @@ int main(void) {
 
             if (pressed.a) {
                 is_climbing_tower = true;
+                int i_closest_tower = -1;
+                float closest_tower_dist = 0.0f;
+                for (int i = 0; i < ARRAY_COUNT(towers); i++) {
+                    fm_vec3_t diff;
+                    fm_vec3_sub(&diff, &towers[i].pos,
+                                &(fm_vec3_t){{free_roam_ctx.suzanne_x,
+                                              free_roam_ctx.suzanne_y, 0}});
+                    float dist = fm_vec3_len(&diff);
+                    if (i_closest_tower == -1 || dist < closest_tower_dist) {
+                        i_closest_tower = i;
+                        closest_tower_dist = dist;
+                    }
+                }
+                i_cur_tower = i_closest_tower;
             }
 
             /*
@@ -669,6 +721,7 @@ int main(void) {
                                        tower_climb_ctx.suzanne_angle +
                                            FM_PI / 2);
                 fm_mat4_rotate(&mat_model, &rotation);
+                fm_mat4_translate(&mat_model, &towers[i_cur_tower].pos);
             } else {
                 fm_mat4_scale_fixed(&mat_model,
                                     &(fm_vec3_t){{0.2f, 0.2f, 0.2f}});
@@ -689,35 +742,45 @@ int main(void) {
             draw_primitive(&Suzanne_0);
         }
 
-        // Draw the tower
-        rdpq_set_prim_color((color_t){100, 100, 255, 255});
-        {
-            fm_mat4_t mat_model;
-            fm_mat4_identity(&mat_model);
-            fm_mat4_translate(&mat_model, &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
-            mgfx_matrices_t *ud_matrices =
-                build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
+        for (int i = 0; i < ARRAY_COUNT(towers); i++) {
+            if (towers[i].tower == NULL) {
+                continue;
+            }
+            // Draw the tower
+            rdpq_set_prim_color((color_t){100, 100, 255, 255});
+            {
+                fm_mat4_t mat_model;
+                fm_mat4_identity(&mat_model);
+                fm_mat4_translate(&mat_model,
+                                  &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
+                fm_mat4_translate(&mat_model, &towers[i].pos);
+                mgfx_matrices_t *ud_matrices = build_matrices(
+                    gfx_ctx, &mat_projection, &mat_view, &mat_model);
 
-            mg_uniform_load(u_matrices, ud_matrices);
+                mg_uniform_load(u_matrices, ud_matrices);
 
-            add_used_primitive(gfx_ctx, tower_primitive);
-            draw_primitive(tower_primitive);
-        }
+                add_used_primitive(gfx_ctx, towers[i].tower_primitive);
+                draw_primitive(towers[i].tower_primitive);
+            }
 
-        // Draw the tower walls
-        mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
-        rdpq_set_prim_color((color_t){50, 50, 200, 255});
-        {
-            fm_mat4_t mat_model;
-            fm_mat4_identity(&mat_model);
-            fm_mat4_translate(&mat_model, &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
-            mgfx_matrices_t *ud_matrices =
-                build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
+            // Draw the tower walls
+            mg_set_culling(
+                &(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
+            rdpq_set_prim_color((color_t){50, 50, 200, 255});
+            {
+                fm_mat4_t mat_model;
+                fm_mat4_identity(&mat_model);
+                fm_mat4_translate(&mat_model,
+                                  &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
+                fm_mat4_translate(&mat_model, &towers[i].pos);
+                mgfx_matrices_t *ud_matrices = build_matrices(
+                    gfx_ctx, &mat_projection, &mat_view, &mat_model);
 
-            mg_uniform_load(u_matrices, ud_matrices);
+                mg_uniform_load(u_matrices, ud_matrices);
 
-            add_used_primitive(gfx_ctx, tower_walls_primitive);
-            draw_primitive(tower_walls_primitive);
+                add_used_primitive(gfx_ctx, towers[i].tower_walls_primitive);
+                draw_primitive(towers[i].tower_walls_primitive);
+            }
         }
 
         mg_pipeline_bind(textured_pipeline);
@@ -789,10 +852,12 @@ int main(void) {
             mg_draw_triangle(0, 3, 2);
         }
 
-        // Print the seed
-        rdpq_set_mode_standard();
-        rdpq_text_printf(&(rdpq_textparms_t){}, font_id, 10, 10, "0x%08X",
-                         seed);
+        if (is_climbing_tower) {
+            // Print the seed
+            rdpq_set_mode_standard();
+            rdpq_text_printf(&(rdpq_textparms_t){}, font_id, 10, 10, "0x%08X",
+                             towers[i_cur_tower].seed);
+        }
 
         rdpq_detach_show();
 
