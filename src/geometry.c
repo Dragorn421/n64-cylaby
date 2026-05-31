@@ -146,9 +146,10 @@ bool add_quad(struct geom_mesh *mesh, fm_vec3_t *a, fm_vec3_t *b, fm_vec3_t *c,
 }
 
 /**
- * Convert a mesh to a (dynamically allocated) primitive (data that can be drawn).
+ * Convert a mesh to a (dynamically allocated) primitive (data that can be
+ * drawn).
  */
-struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh) {
+struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh, float scale) {
     struct primitive *primitive = malloc(sizeof(struct primitive));
     if (primitive == NULL) {
         return NULL;
@@ -188,7 +189,11 @@ struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh) {
             fm_vec3_norm(&n, &n);
             for (int k = 0; k < 3; k++) {
                 fm_vec3_t *v = &mesh->vertices[tri_verts[k]];
-                int16_t pos[3] = MGFX_POS(v->x, v->y, v->z);
+                int16_t pos[3] = {
+                    fm_roundf(v->x * scale),
+                    fm_roundf(v->y * scale),
+                    fm_roundf(v->z * scale),
+                };
                 memcpy(primitive->vertices[i_tri * 3 + k].pos, pos,
                        sizeof(pos));
                 primitive->vertices[i_tri * 3 + k].normal =
@@ -264,13 +269,13 @@ void generate_tower_geometry_floor(struct geom_mesh *mesh,
     }
 }
 
-struct primitive *generate_tower_geometry(struct tower *tower) {
+struct primitive *generate_tower_geometry(struct tower *tower, float scale) {
     struct geom_mesh *mesh = malloc_mesh(16, 16);
     for (int i = 0; i < tower->n_floors; i++) {
         generate_tower_geometry_floor(mesh, tower->segments_per_floor, i,
                                       tower->floors[i].corridor);
     }
-    struct primitive *primitive = geom_mesh_to_primitive(mesh);
+    struct primitive *primitive = geom_mesh_to_primitive(mesh, scale);
     free_mesh(mesh);
     return primitive;
 }
@@ -343,13 +348,14 @@ void generate_tower_geometry_floor_walls(struct geom_mesh *mesh,
                                                    floor, wall_flags);
 }
 
-struct primitive *generate_tower_walls_geometry(struct tower *tower) {
+struct primitive *generate_tower_walls_geometry(struct tower *tower,
+                                                float scale) {
     struct geom_mesh *mesh = malloc_mesh(16, 16);
     for (int i = 0; i < tower->n_floors; i++) {
         generate_tower_geometry_floor_walls(mesh, tower->segments_per_floor, i,
                                             tower->floors[i].wall_flags);
     }
-    struct primitive *primitive = geom_mesh_to_primitive(mesh);
+    struct primitive *primitive = geom_mesh_to_primitive(mesh, scale);
     free_mesh(mesh);
     return primitive;
 }

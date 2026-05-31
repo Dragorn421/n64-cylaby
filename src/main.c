@@ -239,14 +239,6 @@ void defered_blocks_free_free(struct defered_blocks_free_ctx *ctx,
     ctx->has_blocks_to_free = !all_freed;
 }
 
-// like fm_lerp_angle but working properly, for until my fm fixes make it
-// upstream
-float my_lerp_angle(float a, float b, float t) {
-    float diff = fmodf((b - a), FM_PI * 2);
-    float dist = fmodf(diff * 2, FM_PI * 2) - diff;
-    return a + dist * t;
-}
-
 float my_lerp_angle_maxed(float a, float b, float t, float max_step) {
     float diff = fmodf((b - a), FM_PI * 2);
     float dist = fmodf(diff * 2, FM_PI * 2) - diff;
@@ -258,23 +250,6 @@ float my_lerp_angle_maxed(float a, float b, float t, float max_step) {
         step = max_step;
     }
     return a + step;
-}
-
-float fm_wrapf(float x, float y) {
-    float v = fm_fmodf(x, y);
-    if (v < 0)
-        v += y;
-    return v;
-}
-
-// like fm_mat4_scale but working properly
-inline void fm_mat4_scale_fixed(fm_mat4_t *out, const fm_vec3_t *scale) {
-    for (int i = 0; i < 4; i++)
-        out->m[i][0] *= scale->x;
-    for (int i = 0; i < 4; i++)
-        out->m[i][1] *= scale->y;
-    for (int i = 0; i < 4; i++)
-        out->m[i][2] *= scale->z;
 }
 
 int main(void) {
@@ -505,10 +480,10 @@ int main(void) {
 
             // Generate the primitives that will be drawn
             towers[i].tower_primitive =
-                generate_tower_geometry(towers[i].tower);
+                generate_tower_geometry(towers[i].tower, 32);
             assert(towers[i].tower_primitive != NULL);
             towers[i].tower_walls_primitive =
-                generate_tower_walls_geometry(towers[i].tower);
+                generate_tower_walls_geometry(towers[i].tower, 32);
             assert(towers[i].tower_walls_primitive != NULL);
 
             data_cache_writeback_invalidate_all();
@@ -584,7 +559,7 @@ int main(void) {
                                towers[i_cur_tower].tower->segments_per_floor)) *
                     (2 * FM_PI / towers[i_cur_tower].tower->segments_per_floor);
                 tower_climb_ctx.suzanne_angle =
-                    my_lerp_angle(tower_climb_ctx.suzanne_angle,
+                    fm_lerp_angle(tower_climb_ctx.suzanne_angle,
                                   target_suzanne_angle, 0.1f * 60 * dt);
             }
 
@@ -672,13 +647,13 @@ int main(void) {
              */
 
             tower_climb_ctx.camera_angle =
-                my_lerp_angle(tower_climb_ctx.camera_angle,
+                fm_lerp_angle(tower_climb_ctx.camera_angle,
                               tower_climb_ctx.suzanne_angle, 0.1f * 60 * dt);
             tower_climb_ctx.camera_at_height =
-                my_lerp_angle(tower_climb_ctx.camera_at_height,
+                fm_lerp_angle(tower_climb_ctx.camera_at_height,
                               tower_climb_ctx.suzanne_height, 0.2f * 60 * dt);
             tower_climb_ctx.camera_eye_height =
-                my_lerp_angle(tower_climb_ctx.camera_eye_height,
+                fm_lerp_angle(tower_climb_ctx.camera_eye_height,
                               tower_climb_ctx.camera_at_height, 0.1f * 60 * dt);
 
             fm_vec3_t eye;
@@ -807,8 +782,8 @@ int main(void) {
             fm_mat4_t mat_model;
             fm_mat4_identity(&mat_model);
             if (is_climbing_tower) {
-                fm_mat4_scale_fixed(&mat_model,
-                                    &(fm_vec3_t){{0.2f, 0.2f, 0.2f}});
+                fm_mat4_scale(&mat_model,
+                              &(fm_vec3_t){{0.2f / 32, 0.2f / 32, 0.2f / 32}});
                 fm_vec3_t translate = {
                     {0.0f, -1.1f, tower_climb_ctx.suzanne_height}};
                 fm_mat4_translate(&mat_model, &translate);
@@ -819,8 +794,8 @@ int main(void) {
                 fm_mat4_rotate(&mat_model, &rotation);
                 fm_mat4_translate(&mat_model, &towers[i_cur_tower].pos);
             } else {
-                fm_mat4_scale_fixed(&mat_model,
-                                    &(fm_vec3_t){{0.2f, 0.2f, 0.2f}});
+                fm_mat4_scale(&mat_model,
+                              &(fm_vec3_t){{0.2f / 32, 0.2f / 32, 0.2f / 32}});
                 fm_quat_t rotation;
                 // Suzanne model looks towards -y (backwards)
                 fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
@@ -847,6 +822,8 @@ int main(void) {
             {
                 fm_mat4_t mat_model;
                 fm_mat4_identity(&mat_model);
+                fm_mat4_scale(&mat_model,
+                              &(fm_vec3_t){{1.0f / 32, 1.0f / 32, 1.0f / 32}});
                 fm_mat4_translate(&mat_model,
                                   &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
                 fm_mat4_translate(&mat_model, &towers[i].pos);
@@ -867,6 +844,8 @@ int main(void) {
             {
                 fm_mat4_t mat_model;
                 fm_mat4_identity(&mat_model);
+                fm_mat4_scale(&mat_model,
+                              &(fm_vec3_t){{1.0f / 32, 1.0f / 32, 1.0f / 32}});
                 fm_mat4_translate(&mat_model,
                                   &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
                 fm_mat4_translate(&mat_model, &towers[i].pos);
@@ -932,7 +911,7 @@ int main(void) {
             fm_mat4_t mat_model;
             fm_mat4_identity(&mat_model);
             float s = 1.0f;
-            fm_mat4_scale_fixed(&mat_model, &(fm_vec3_t){{s, s, s}});
+            fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
             fm_mat4_translate(&mat_model, &(fm_vec3_t){{0, 0, -0.5f}});
             mgfx_matrices_t *textured_ud_matrices =
                 build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
@@ -941,10 +920,10 @@ int main(void) {
 
 #define a (0x20 << b)
             static struct textured_vertex verts[] = {
-                {MGFX_POS(-10, -10, 0), {0, 0}},
-                {MGFX_POS(-10, 10, 0), {0, a * 32}},
-                {MGFX_POS(10, 10, 0), {a * 32, a * 32}},
-                {MGFX_POS(10, -10, 0), {a * 32, 0}},
+                {{-10, -10, 0}, {0, 0}},
+                {{-10, 10, 0}, {0, a * 32}},
+                {{10, 10, 0}, {a * 32, a * 32}},
+                {{10, -10, 0}, {a * 32, 0}},
             };
             mg_bind_vertex_buffer(verts);
             mg_load_vertices(0, 0, 4);

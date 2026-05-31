@@ -9,7 +9,7 @@
 
 void geom_mesh_free_primitive(struct primitive *primitive);
 
-struct primitive *generate_tower_geometry(struct tower *tower);
-struct primitive *generate_tower_walls_geometry(struct tower *tower);
+struct primitive *generate_tower_geometry(struct tower *tower, float scale);
+struct primitive *generate_tower_walls_geometry(struct tower *tower, float scale);
 
 #endif

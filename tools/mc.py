@@ -138,7 +138,9 @@ def main():
                     norm = normals[i_vertex]
                     f.write(
                         "  { "
-                        f"MGFX_POS({pos[0]}, {pos[1]}, {pos[2]}), "
+                        "{"
+                        f"{round(pos[0])}, {round(pos[1])}, {round(pos[2])}"
+                        "}, "
                         f"MGFX_NRMF({norm[0]}, {norm[1]}, {norm[2]})"
                         " },\n"
                     )
