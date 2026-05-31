@@ -15,6 +15,11 @@
 
 #include "../assets/Suzanne.h"
 
+// height of Suzanne's scalp above its origin, in meters
+#define SUZANNE_SCALP_Z_M 0.15f
+// height of Suzanne's chin below its origin, in meters
+#define SUZANNE_CHIN_Z_M 0.25f
+
 #ifndef ARRAY_COUNT
 #define ARRAY_COUNT(arr) (sizeof(arr) / sizeof(arr[0]))
 #endif
@@ -594,13 +599,15 @@ int main(void) {
 
             // Vertical movement
             tower_climb_ctx.suzanne_height += inputs.stick_y / 60.0f * dt;
-            if (tower_climb_ctx.suzanne_height < -0.25f) {
-                tower_climb_ctx.suzanne_height = -0.25f;
+            if (tower_climb_ctx.suzanne_height < -0.5f + SUZANNE_CHIN_Z_M) {
+                tower_climb_ctx.suzanne_height = -0.5f + SUZANNE_CHIN_Z_M;
             }
             if (tower_climb_ctx.suzanne_height >
-                towers[i_cur_tower].tower->n_floors - 1 + 0.35f) {
+                towers[i_cur_tower].tower->n_floors - 1 + 0.5f -
+                    SUZANNE_SCALP_Z_M) {
                 tower_climb_ctx.suzanne_height =
-                    towers[i_cur_tower].tower->n_floors - 1 + 0.35f;
+                    towers[i_cur_tower].tower->n_floors - 1 + 0.5f -
+                    SUZANNE_SCALP_Z_M;
             }
             {
                 int segment =
@@ -615,7 +622,7 @@ int main(void) {
                             .tower->floors[floor]
                             .wall_flags[segment] &
                         WF_HORIZONTAL) {
-                        float limit = floor + 0.35f;
+                        float limit = floor + 0.5f - SUZANNE_SCALP_Z_M;
                         if (tower_climb_ctx.suzanne_height > limit) {
                             tower_climb_ctx.suzanne_height = limit;
                         }
@@ -624,7 +631,7 @@ int main(void) {
                                           .tower->floors[floor - 1]
                                           .wall_flags[segment] &
                                       WF_HORIZONTAL)) {
-                        float limit = floor - 0.25f;
+                        float limit = floor - 0.5f + SUZANNE_CHIN_Z_M;
                         if (tower_climb_ctx.suzanne_height < limit) {
                             tower_climb_ctx.suzanne_height = limit;
                         }
@@ -721,8 +728,11 @@ int main(void) {
                     0.1f * 60 * dt, FM_DEG2RAD(180.0f / 60) * 60 * dt));
             }
 
-            fm_vec3_t target = {
-                {free_roam_ctx.suzanne_x, free_roam_ctx.suzanne_y, 25.0f}};
+            fm_vec3_t target = {{
+                free_roam_ctx.suzanne_x,
+                free_roam_ctx.suzanne_y,
+                SUZANNE_CHIN_Z_M * 100,
+            }};
             fm_vec3_t eyeToTarget;
             // camera_yaw = 0 -> (0,1) (forward)
             // camera_yaw = pi/2 -> (-1,0) (leftward)
@@ -800,8 +810,11 @@ int main(void) {
                 fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
                                        free_roam_ctx.suzanne_yaw + FM_PI);
                 fm_mat4_rotate(&mat_model, &rotation);
-                fm_vec3_t translate = {
-                    {free_roam_ctx.suzanne_x, free_roam_ctx.suzanne_y, 25.0f}};
+                fm_vec3_t translate = {{
+                    free_roam_ctx.suzanne_x,
+                    free_roam_ctx.suzanne_y,
+                    SUZANNE_CHIN_Z_M * 100,
+                }};
                 fm_mat4_translate(&mat_model, &translate);
             }
             mgfx_matrices_t *ud_matrices =
