@@ -361,8 +361,8 @@ int main(void) {
     data_cache_writeback_invalidate_all();
 
     fm_mat4_t mat_projection;
-#define Z_NEAR 0.1f
-#define Z_FAR 10.0f
+#define Z_NEAR 10.0f
+#define Z_FAR 1000.0f
     mg_mat4_perspective(&mat_projection, FM_DEG2RAD(60),
                         (float)display_get_width() / display_get_height(),
                         Z_NEAR, Z_FAR);
@@ -377,6 +377,7 @@ int main(void) {
 
     struct {
         // "_angle" refer to angular positions (in radians)
+        // "_height" values are in units of floors
         float suzanne_angle;
         float suzanne_height;
         float camera_angle;
@@ -402,9 +403,9 @@ int main(void) {
         bool rebuild_tower;
         fm_vec3_t pos;
     } towers[3] = {0};
-    towers[0].pos = (fm_vec3_t){{3, 0, 0}};
-    towers[1].pos = (fm_vec3_t){{-3, 0, 0}};
-    towers[2].pos = (fm_vec3_t){{0, 3, 0}};
+    towers[0].pos = (fm_vec3_t){{300, 0, 0}};
+    towers[1].pos = (fm_vec3_t){{-300, 0, 0}};
+    towers[2].pos = (fm_vec3_t){{0, 300, 0}};
     for (int i = 0; i < ARRAY_COUNT(towers); i++) {
         towers[i].rebuild_tower = true;
     }
@@ -480,10 +481,10 @@ int main(void) {
 
             // Generate the primitives that will be drawn
             towers[i].tower_primitive =
-                generate_tower_geometry(towers[i].tower, 32);
+                generate_tower_geometry(towers[i].tower, 100);
             assert(towers[i].tower_primitive != NULL);
             towers[i].tower_walls_primitive =
-                generate_tower_walls_geometry(towers[i].tower, 32);
+                generate_tower_walls_geometry(towers[i].tower, 100);
             assert(towers[i].tower_walls_primitive != NULL);
 
             data_cache_writeback_invalidate_all();
@@ -593,13 +594,13 @@ int main(void) {
 
             // Vertical movement
             tower_climb_ctx.suzanne_height += inputs.stick_y / 60.0f * dt;
-            if (tower_climb_ctx.suzanne_height < -0.3f) {
-                tower_climb_ctx.suzanne_height = -0.3f;
+            if (tower_climb_ctx.suzanne_height < -0.25f) {
+                tower_climb_ctx.suzanne_height = -0.25f;
             }
             if (tower_climb_ctx.suzanne_height >
-                towers[i_cur_tower].tower->n_floors - 1 + 0.3f) {
+                towers[i_cur_tower].tower->n_floors - 1 + 0.35f) {
                 tower_climb_ctx.suzanne_height =
-                    towers[i_cur_tower].tower->n_floors - 1 + 0.3f;
+                    towers[i_cur_tower].tower->n_floors - 1 + 0.35f;
             }
             {
                 int segment =
@@ -614,7 +615,7 @@ int main(void) {
                             .tower->floors[floor]
                             .wall_flags[segment] &
                         WF_HORIZONTAL) {
-                        float limit = floor + 0.3f;
+                        float limit = floor + 0.35f;
                         if (tower_climb_ctx.suzanne_height > limit) {
                             tower_climb_ctx.suzanne_height = limit;
                         }
@@ -623,7 +624,7 @@ int main(void) {
                                           .tower->floors[floor - 1]
                                           .wall_flags[segment] &
                                       WF_HORIZONTAL)) {
-                        float limit = floor - 0.3f;
+                        float limit = floor - 0.25f;
                         if (tower_climb_ctx.suzanne_height < limit) {
                             tower_climb_ctx.suzanne_height = limit;
                         }
@@ -659,9 +660,10 @@ int main(void) {
             fm_vec3_t eye;
             fm_sincosf(tower_climb_ctx.camera_angle, &eye.y, &eye.x);
             eye.z = 0.0f;
-            fm_vec3_scale(&eye, &eye, 2.0f);
-            eye.z = tower_climb_ctx.camera_eye_height;
-            fm_vec3_t target = {{0, 0, tower_climb_ctx.camera_at_height}};
+            fm_vec3_scale(&eye, &eye, 200.0f);
+            eye.z = (tower_climb_ctx.camera_eye_height + 0.5f) * 100.0f;
+            fm_vec3_t target = {
+                {0, 0, (tower_climb_ctx.camera_at_height + 0.5f) * 100.0f}};
             fm_vec3_add(&eye, &eye, &towers[i_cur_tower].pos);
             fm_vec3_add(&target, &target, &towers[i_cur_tower].pos);
             fm_mat4_lookat(&mat_view, &eye, &target, &(fm_vec3_t){{0, 0, 1}});
@@ -670,7 +672,7 @@ int main(void) {
             fm_mat3_identity(&mat);
             fm_mat3_rotate(&mat, -free_roam_ctx.camera_yaw);
             fm_vec3_t d;
-            float f = 1 / 60.0f * 0.1f * 60 * dt;
+            float f = 1 / 60.0f * 10.0f * 60 * dt;
             fm_mat3_mul_vec2(
                 &d, &mat,
                 &(fm_vec2_t){{inputs.stick_x * f, inputs.stick_y * f}});
@@ -720,14 +722,14 @@ int main(void) {
             }
 
             fm_vec3_t target = {
-                {free_roam_ctx.suzanne_x, free_roam_ctx.suzanne_y, 0.0f}};
+                {free_roam_ctx.suzanne_x, free_roam_ctx.suzanne_y, 25.0f}};
             fm_vec3_t eyeToTarget;
             // camera_yaw = 0 -> (0,1) (forward)
             // camera_yaw = pi/2 -> (-1,0) (leftward)
             fm_sincosf(free_roam_ctx.camera_yaw + FM_PI / 2, &eyeToTarget.y,
                        &eyeToTarget.x);
             eyeToTarget.z = 0.0f;
-            fm_vec3_scale(&eyeToTarget, &eyeToTarget, 2.0f);
+            fm_vec3_scale(&eyeToTarget, &eyeToTarget, 200.0f);
             fm_vec3_t eye;
             fm_vec3_sub(&eye, &target, &eyeToTarget);
             fm_mat4_lookat(&mat_view, &eye, &target, &(fm_vec3_t){{0, 0, 1}});
@@ -782,10 +784,9 @@ int main(void) {
             fm_mat4_t mat_model;
             fm_mat4_identity(&mat_model);
             if (is_climbing_tower) {
-                fm_mat4_scale(&mat_model,
-                              &(fm_vec3_t){{0.2f / 32, 0.2f / 32, 0.2f / 32}});
                 fm_vec3_t translate = {
-                    {0.0f, -1.1f, tower_climb_ctx.suzanne_height}};
+                    {0.0f, -110.0f,
+                     (tower_climb_ctx.suzanne_height + 0.5f) * 100.0f}};
                 fm_mat4_translate(&mat_model, &translate);
                 fm_quat_t rotation;
                 fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
@@ -794,15 +795,13 @@ int main(void) {
                 fm_mat4_rotate(&mat_model, &rotation);
                 fm_mat4_translate(&mat_model, &towers[i_cur_tower].pos);
             } else {
-                fm_mat4_scale(&mat_model,
-                              &(fm_vec3_t){{0.2f / 32, 0.2f / 32, 0.2f / 32}});
                 fm_quat_t rotation;
                 // Suzanne model looks towards -y (backwards)
                 fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
                                        free_roam_ctx.suzanne_yaw + FM_PI);
                 fm_mat4_rotate(&mat_model, &rotation);
                 fm_vec3_t translate = {
-                    {free_roam_ctx.suzanne_x, free_roam_ctx.suzanne_y, 0.0f}};
+                    {free_roam_ctx.suzanne_x, free_roam_ctx.suzanne_y, 25.0f}};
                 fm_mat4_translate(&mat_model, &translate);
             }
             mgfx_matrices_t *ud_matrices =
@@ -822,10 +821,6 @@ int main(void) {
             {
                 fm_mat4_t mat_model;
                 fm_mat4_identity(&mat_model);
-                fm_mat4_scale(&mat_model,
-                              &(fm_vec3_t){{1.0f / 32, 1.0f / 32, 1.0f / 32}});
-                fm_mat4_translate(&mat_model,
-                                  &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
                 fm_mat4_translate(&mat_model, &towers[i].pos);
                 mgfx_matrices_t *ud_matrices = build_matrices(
                     gfx_ctx, &mat_projection, &mat_view, &mat_model);
@@ -844,10 +839,6 @@ int main(void) {
             {
                 fm_mat4_t mat_model;
                 fm_mat4_identity(&mat_model);
-                fm_mat4_scale(&mat_model,
-                              &(fm_vec3_t){{1.0f / 32, 1.0f / 32, 1.0f / 32}});
-                fm_mat4_translate(&mat_model,
-                                  &(fm_vec3_t){{0.0f, 0.0f, -0.5f}});
                 fm_mat4_translate(&mat_model, &towers[i].pos);
                 mgfx_matrices_t *ud_matrices = build_matrices(
                     gfx_ctx, &mat_projection, &mat_view, &mat_model);
@@ -912,7 +903,6 @@ int main(void) {
             fm_mat4_identity(&mat_model);
             float s = 1.0f;
             fm_mat4_scale(&mat_model, &(fm_vec3_t){{s, s, s}});
-            fm_mat4_translate(&mat_model, &(fm_vec3_t){{0, 0, -0.5f}});
             mgfx_matrices_t *textured_ud_matrices =
                 build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
 
@@ -920,10 +910,10 @@ int main(void) {
 
 #define a (0x20 << b)
             static struct textured_vertex verts[] = {
-                {{-10, -10, 0}, {0, 0}},
-                {{-10, 10, 0}, {0, a * 32}},
-                {{10, 10, 0}, {a * 32, a * 32}},
-                {{10, -10, 0}, {a * 32, 0}},
+                {{-1000, -1000, 0}, {0, 0}},
+                {{-1000, 1000, 0}, {0, a * 32}},
+                {{1000, 1000, 0}, {a * 32, a * 32}},
+                {{1000, -1000, 0}, {a * 32, 0}},
             };
             mg_bind_vertex_buffer(verts);
             mg_load_vertices(0, 0, 4);
