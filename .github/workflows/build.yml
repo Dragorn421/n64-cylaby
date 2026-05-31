@@ -6,15 +6,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      CCACHE: ccache
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+
     steps:
     - uses: actions/checkout@v6
       with:
         submodules: recursive
 
+    - name: Install dependencies
+      run: sudo apt-get install ccache
+
     - name: Install N64 toolchain
       run: |
         curl -L -o gcc-toolchain-mips64-x86_64.deb https://github.com/DragonMinded/libdragon/releases/download/toolchain-continuous-prerelease/gcc-toolchain-mips64-x86_64.deb
         sudo dpkg -i gcc-toolchain-mips64-x86_64.deb
+
+    - name: Cache .ccache
+      uses: actions/cache@v5
+      with:
+        path: ${{ env.CCACHE_DIR }}
+        key: .ccache
 
     - name: Build libdragon
       run: N64_GCCPREFIX=/opt/libdragon ./build_libdragon.sh
