@@ -16,5 +16,7 @@ The random seed used to generate the current maze is drawn top-left.
 ### Controls
 
 - analog stick to move
-- A to go through a corridor
-- Z to generate a new maze
+- A to start climbing a near-enough tower
+- while climbing: B to stop climbing
+- while climbing: A to go through a corridor
+- while climbing: Z to generate a new maze
