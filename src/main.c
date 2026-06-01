@@ -764,10 +764,27 @@ int main(void) {
                 free_roam_ctx.suzanne_y = pos.y;
             }
 
-            if (pressed.a) {
+            if (pressed.a &&
+                closest_tower_dist < TOWER_RADIUS + SUZANNE_RADIUS * 2) {
                 is_climbing_tower = true;
                 cam_switch_timer = cam_switch_timer_ini = 1.0f;
                 i_cur_tower = i_closest_tower;
+                memset(&tower_climb_ctx, 0, sizeof(tower_climb_ctx));
+                if (closest_tower_dist > FM_EPSILON) {
+                    fm_vec2_t diff;
+                    fm_vec2_sub(&diff,
+                                &(fm_vec2_t){{
+                                    free_roam_ctx.suzanne_x,
+                                    free_roam_ctx.suzanne_y,
+                                }},
+                                &(fm_vec2_t){{
+                                    towers[i_closest_tower].pos.x,
+                                    towers[i_closest_tower].pos.y,
+                                }});
+                    tower_climb_ctx.suzanne_angle =
+                        tower_climb_ctx.camera_angle =
+                            fm_atan2f(diff.y, diff.x);
+                }
             }
 
             /*
