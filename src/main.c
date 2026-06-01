@@ -19,6 +19,8 @@
 #define SUZANNE_SCALP_Z_M 0.15f
 // height of Suzanne's chin below its origin, in meters
 #define SUZANNE_CHIN_Z_M 0.25f
+// approximate radius of bounding sphere for Suzanne, in centimeters (units)
+#define SUZANNE_RADIUS 25.0f
 
 #ifndef ARRAY_COUNT
 #define ARRAY_COUNT(arr) (sizeof(arr) / sizeof(arr[0]))
@@ -499,11 +501,12 @@ int main(void) {
             build_tower_walls(towers[i].tower);
 
             // Generate the primitives that will be drawn
+#define TOWER_RADIUS 100.0f
             towers[i].tower_primitive =
-                generate_tower_geometry(towers[i].tower, 100);
+                generate_tower_geometry(towers[i].tower, TOWER_RADIUS);
             assert(towers[i].tower_primitive != NULL);
             towers[i].tower_walls_primitive =
-                generate_tower_walls_geometry(towers[i].tower, 100);
+                generate_tower_walls_geometry(towers[i].tower, TOWER_RADIUS);
             assert(towers[i].tower_walls_primitive != NULL);
 
             data_cache_writeback_invalidate_all();
@@ -686,10 +689,13 @@ int main(void) {
 
             fm_sincosf(tower_climb_ctx.camera_angle, &eye.y, &eye.x);
             eye.z = 0.0f;
-            fm_vec3_scale(&eye, &eye, 200.0f);
-            eye.z = (tower_climb_ctx.camera_eye_height + 0.5f) * 100.0f;
-            target = (fm_vec3_t){
-                {0, 0, (tower_climb_ctx.camera_at_height + 0.5f) * 100.0f}};
+            fm_vec3_scale(&eye, &eye, 2.0f * TOWER_RADIUS);
+            eye.z = (tower_climb_ctx.camera_eye_height + 0.5f) * TOWER_RADIUS;
+            target = (fm_vec3_t){{
+                0,
+                0,
+                (tower_climb_ctx.camera_at_height + 0.5f) * TOWER_RADIUS,
+            }};
             fm_vec3_add(&eye, &eye, &towers[i_cur_tower].pos);
             fm_vec3_add(&target, &target, &towers[i_cur_tower].pos);
             up = (fm_vec3_t){{0, 0, 1}};
@@ -716,22 +722,51 @@ int main(void) {
                 free_roam_ctx.suzanne_yaw_idle_time += dt;
             }
 
+            int i_closest_tower = -1;
+            float closest_tower_dist = 0.0f;
+            for (int i = 0; i < ARRAY_COUNT(towers); i++) {
+                fm_vec3_t diff;
+                fm_vec3_sub(&diff, &towers[i].pos,
+                            &(fm_vec3_t){{free_roam_ctx.suzanne_x,
+                                          free_roam_ctx.suzanne_y, 0}});
+                float dist = fm_vec3_len(&diff);
+                if (i_closest_tower == -1 || dist < closest_tower_dist) {
+                    i_closest_tower = i;
+                    closest_tower_dist = dist;
+                }
+            }
+            if (closest_tower_dist < TOWER_RADIUS + SUZANNE_RADIUS) {
+                fm_vec2_t diff;
+                if (closest_tower_dist > FM_EPSILON) {
+                    fm_vec2_sub(&diff,
+                                &(fm_vec2_t){{
+                                    free_roam_ctx.suzanne_x,
+                                    free_roam_ctx.suzanne_y,
+                                }},
+                                &(fm_vec2_t){{
+                                    towers[i_closest_tower].pos.x,
+                                    towers[i_closest_tower].pos.y,
+                                }});
+                    fm_vec2_scale(&diff, &diff,
+                                  (TOWER_RADIUS + SUZANNE_RADIUS) /
+                                      closest_tower_dist);
+                } else {
+                    diff = (fm_vec2_t){{TOWER_RADIUS + SUZANNE_RADIUS, 0.0f}};
+                }
+                fm_vec2_t pos;
+                fm_vec2_add(&pos,
+                            &(fm_vec2_t){{
+                                towers[i_closest_tower].pos.x,
+                                towers[i_closest_tower].pos.y,
+                            }},
+                            &diff);
+                free_roam_ctx.suzanne_x = pos.x;
+                free_roam_ctx.suzanne_y = pos.y;
+            }
+
             if (pressed.a) {
                 is_climbing_tower = true;
                 cam_switch_timer = cam_switch_timer_ini = 1.0f;
-                int i_closest_tower = -1;
-                float closest_tower_dist = 0.0f;
-                for (int i = 0; i < ARRAY_COUNT(towers); i++) {
-                    fm_vec3_t diff;
-                    fm_vec3_sub(&diff, &towers[i].pos,
-                                &(fm_vec3_t){{free_roam_ctx.suzanne_x,
-                                              free_roam_ctx.suzanne_y, 0}});
-                    float dist = fm_vec3_len(&diff);
-                    if (i_closest_tower == -1 || dist < closest_tower_dist) {
-                        i_closest_tower = i;
-                        closest_tower_dist = dist;
-                    }
-                }
                 i_cur_tower = i_closest_tower;
             }
 
