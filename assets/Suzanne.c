@@ -2076,6 +2076,7 @@
   Suzanne_0_vertices,
   Suzanne_0_indices,
   2904,
+  VERTEX_KIND_STANDARD,
  };
 struct primitive *Suzanne_primitives[] = {
  &Suzanne_0,

@@ -4,6 +4,7 @@
 #ifndef CYLABY_MODEL_H
 #define CYLABY_MODEL_H
 
+#include <stdalign.h>
 #include <stdint.h>
 
 #include <libdragon.h>
@@ -31,11 +32,20 @@ struct vertex {
     uint16_t normal;
 };
 
+struct textured_vertex {
+    int16_t pos[3];
+    uint16_t normal;
+    alignas(4) int16_t st[2];
+};
+
+enum vertex_kind { VERTEX_KIND_STANDARD, VERTEX_KIND_TEXTURED };
+
 struct primitive {
     int material;
-    struct vertex *vertices;
+    void *vertices;
     uint16_t *indices;
     uint32_t index_count;
+    enum vertex_kind vertices_kind;
 };
 
 struct mesh {

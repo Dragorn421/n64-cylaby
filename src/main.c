@@ -322,15 +322,14 @@ int main(void) {
 
     data_cache_writeback_invalidate_all();
 
-    struct textured_vertex {
-        int16_t pos[3];
-        alignas(4) int16_t st[2];
-    };
-
     mg_vertex_attribute_t textured_vertex_attributes[] = {
         {
             .input = MGFX_ATTRIBUTE_POSITION,
             .offset = offsetof(struct textured_vertex, pos),
+        },
+        {
+            .input = MGFX_ATTRIBUTE_NORMAL,
+            .offset = offsetof(struct textured_vertex, normal),
         },
         {
             .input = MGFX_ATTRIBUTE_TEXCOORD,
@@ -419,6 +418,19 @@ int main(void) {
     rspq_block_begin();
     draw_primitive(&Suzanne_0);
     rspq_block_t *suzanne_block = rspq_block_end();
+
+#define GROUND_ST_SHIFT 4
+    struct primitive *ground_primitive = generate_ground_geometry(
+        &(fm_vec2_t){{-1000, -1000}}, &(fm_vec2_t){{1000, 1000}}, 0,
+        &(fm_vec2_t){{0, 0}},
+        &(fm_vec2_t){{32 << GROUND_ST_SHIFT, 32 << GROUND_ST_SHIFT}}, 10, 10,
+        &(fm_vec3_t){{200, 200, 0}});
+
+    data_cache_writeback_invalidate_all();
+
+    rspq_block_begin();
+    draw_primitive(ground_primitive);
+    rspq_block_t *ground_block = rspq_block_end();
 
     while (true) {
         // get and initialize GfxCtx
@@ -895,9 +907,8 @@ int main(void) {
                         &(rdpq_texparms_t){
                             .s.repeats = REPEAT_INFINITE,
                             .t.repeats = REPEAT_INFINITE,
-#define b 4
-                            .s.scale_log = b,
-                            .t.scale_log = b,
+                            .s.scale_log = GROUND_ST_SHIFT,
+                            .t.scale_log = GROUND_ST_SHIFT,
                         });
         {
             fm_mat4_t mat_model;
@@ -909,17 +920,7 @@ int main(void) {
 
             mg_uniform_load(textured_u_matrices, textured_ud_matrices);
 
-#define a (0x20 << b)
-            static struct textured_vertex verts[] = {
-                {{-1000, -1000, 0}, {0, 0}},
-                {{-1000, 1000, 0}, {0, a * 32}},
-                {{1000, 1000, 0}, {a * 32, a * 32}},
-                {{1000, -1000, 0}, {a * 32, 0}},
-            };
-            mg_bind_vertex_buffer(verts);
-            mg_load_vertices(0, 0, 4);
-            mg_draw_triangle(0, 1, 2);
-            mg_draw_triangle(0, 3, 2);
+            rspq_block_run(ground_block);
         }
 
         if (is_climbing_tower) {

@@ -164,6 +164,7 @@ def main():
                 f.write(f"  {primitive_prefix}_vertices,\n")
                 f.write(f"  {primitive_prefix}_indices,\n")
                 f.write(f"  {indices.shape[0]},\n")
+                f.write(f"  VERTEX_KIND_STANDARD,\n")
                 f.write(" };\n")
 
                 primitives_symbols.append(primitive_prefix)

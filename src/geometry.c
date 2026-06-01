@@ -29,6 +29,11 @@ struct geom_mesh {
      */
     fm_vec3_t *vertices;
     /**
+     * Buffer of texture coordinates. Same length, buffer size and indices as
+     * vertices. May be NULL.
+     */
+    float (*st_attribute)[2];
+    /**
      * Buffer of polygons. There are n_polygons vertices. The buffer can hold up
      * to max_polygons. The add_polygon function automatically grows the buffer.
      */
@@ -39,15 +44,24 @@ struct geom_mesh {
     int n_polygons;
 };
 
-struct geom_mesh *malloc_mesh(int max_vertices_ini, int max_polygons_ini) {
+struct geom_mesh *malloc_mesh(int max_vertices_ini, int max_polygons_ini,
+                              bool with_st_attribute) {
     struct geom_mesh *mesh = malloc(sizeof(struct geom_mesh));
     if (mesh == NULL) {
         return NULL;
     }
     mesh->vertices = malloc(sizeof(fm_vec3_t) * max_vertices_ini);
+    if (with_st_attribute) {
+        mesh->st_attribute = malloc(sizeof(float[2]) * max_vertices_ini);
+    } else {
+        mesh->st_attribute = NULL;
+    }
     mesh->polygons = malloc(sizeof(struct geom_polygon) * max_polygons_ini);
-    if (mesh->vertices == NULL || mesh->polygons == NULL) {
+    if (mesh->vertices == NULL ||
+        (with_st_attribute && mesh->st_attribute == NULL) ||
+        mesh->polygons == NULL) {
         free(mesh->vertices);
+        free(mesh->st_attribute);
         free(mesh->polygons);
         free(mesh);
         return NULL;
@@ -78,6 +92,14 @@ fm_vec3_t *add_vertex(struct geom_mesh *mesh, int *i_vertex_p) {
             return NULL;
         }
         mesh->vertices = tmp;
+        if (mesh->st_attribute != NULL) {
+            void *tmp2 = realloc(mesh->st_attribute,
+                                 sizeof(float[2]) * new_max_vertices);
+            if (tmp2 == NULL) {
+                return NULL;
+            }
+            mesh->st_attribute = tmp2;
+        }
         mesh->max_vertices = new_max_vertices;
     }
     assert(mesh->n_vertices < mesh->max_vertices);
@@ -149,7 +171,12 @@ bool add_quad(struct geom_mesh *mesh, fm_vec3_t *a, fm_vec3_t *b, fm_vec3_t *c,
  * Convert a mesh to a (dynamically allocated) primitive (data that can be
  * drawn).
  */
-struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh, float scale) {
+struct primitive *geom_mesh_to_primitive_impl(
+    struct geom_mesh *mesh, float scale, enum vertex_kind vertices_kind,
+    size_t vertex_sz,
+    void (*vertex_handler)(struct geom_mesh *, int vertex_i,
+                           int16_t *vertex_pos, uint16_t vertex_normal,
+                           void *vertex)) {
     struct primitive *primitive = malloc(sizeof(struct primitive));
     if (primitive == NULL) {
         return NULL;
@@ -160,7 +187,9 @@ struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh, float scale) {
             n_triangles += mesh->polygons[i].n_vertices - 2;
         }
     }
-    primitive->vertices = malloc(sizeof(struct vertex) * 3 * n_triangles);
+    primitive->vertices_kind = vertices_kind;
+    char *primitive_vertices_buf = malloc(vertex_sz * 3 * n_triangles);
+    primitive->vertices = primitive_vertices_buf;
     primitive->indices = malloc(sizeof(uint16_t) * 3 * n_triangles);
     if (primitive->vertices == NULL || primitive->indices == NULL) {
         free(primitive->vertices);
@@ -194,10 +223,10 @@ struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh, float scale) {
                     fm_roundf(v->y * scale),
                     fm_roundf(v->z * scale),
                 };
-                memcpy(primitive->vertices[i_tri * 3 + k].pos, pos,
-                       sizeof(pos));
-                primitive->vertices[i_tri * 3 + k].normal =
-                    MGFX_NRMF(n.x, n.y, n.z);
+                vertex_handler(mesh, tri_verts[k], pos,
+                               MGFX_NRMF(n.x, n.y, n.z),
+                               primitive_vertices_buf);
+                primitive_vertices_buf += vertex_sz;
                 primitive->indices[i_tri * 3 + k] = i_tri * 3 + k;
             }
             i_tri++;
@@ -206,6 +235,43 @@ struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh, float scale) {
     assert(i_tri == n_triangles);
 
     return primitive;
+}
+
+void vertex_handler_standard(struct geom_mesh *mesh, int vertex_i,
+                             int16_t *vertex_pos, uint16_t vertex_normal,
+                             void *vertex) {
+    struct vertex *v = vertex;
+    memcpy(v->pos, vertex_pos, sizeof(v->pos));
+    v->normal = vertex_normal;
+}
+
+struct primitive *geom_mesh_to_primitive(struct geom_mesh *mesh, float scale) {
+    return geom_mesh_to_primitive_impl(mesh, scale, VERTEX_KIND_STANDARD,
+                                       sizeof(struct vertex),
+                                       vertex_handler_standard);
+}
+
+void vertex_handler_textured(struct geom_mesh *mesh, int vertex_i,
+                             int16_t *vertex_pos, uint16_t vertex_normal,
+                             void *vertex) {
+    struct textured_vertex *v = vertex;
+    memcpy(v->pos, vertex_pos, sizeof(v->pos));
+    if (mesh->st_attribute != NULL) {
+        memcpy(v->st,
+               &(int16_t[2])MGFX_TEX(mesh->st_attribute[vertex_i][0],
+                                     mesh->st_attribute[vertex_i][1]),
+               sizeof(v->st));
+    } else {
+        v->st[0] = v->st[1] = 0;
+    }
+    v->normal = vertex_normal;
+}
+
+struct primitive *geom_mesh_to_primitive_textured(struct geom_mesh *mesh,
+                                                  float scale) {
+    return geom_mesh_to_primitive_impl(mesh, scale, VERTEX_KIND_TEXTURED,
+                                       sizeof(struct textured_vertex),
+                                       vertex_handler_textured);
 }
 
 void geom_mesh_free_primitive(struct primitive *primitive) {
@@ -270,7 +336,7 @@ void generate_tower_geometry_floor(struct geom_mesh *mesh,
 }
 
 struct primitive *generate_tower_geometry(struct tower *tower, float scale) {
-    struct geom_mesh *mesh = malloc_mesh(16, 16);
+    struct geom_mesh *mesh = malloc_mesh(16, 16, false);
     for (int i = 0; i < tower->n_floors; i++) {
         generate_tower_geometry_floor(mesh, tower->segments_per_floor, i,
                                       tower->floors[i].corridor);
@@ -350,12 +416,100 @@ void generate_tower_geometry_floor_walls(struct geom_mesh *mesh,
 
 struct primitive *generate_tower_walls_geometry(struct tower *tower,
                                                 float scale) {
-    struct geom_mesh *mesh = malloc_mesh(16, 16);
+    struct geom_mesh *mesh = malloc_mesh(16, 16, false);
     for (int i = 0; i < tower->n_floors; i++) {
         generate_tower_geometry_floor_walls(mesh, tower->segments_per_floor, i,
                                             tower->floors[i].wall_flags);
     }
     struct primitive *primitive = geom_mesh_to_primitive(mesh, scale);
     free_mesh(mesh);
+    return primitive;
+}
+
+struct primitive *generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to,
+                                           float z, fm_vec2_t *st_from,
+                                           fm_vec2_t *st_to, int subdivX,
+                                           int subdivY, fm_vec3_t *noise) {
+    struct geom_mesh *mesh = malloc_mesh(16, 16, true);
+    fm_vec3_t *noise_map_rough =
+        malloc(sizeof(fm_vec3_t) * (subdivX + 1) * (subdivY + 1));
+    fm_vec3_t *noise_map =
+        malloc(sizeof(fm_vec3_t) * (subdivX + 1) * (subdivY + 1));
+    int *vertices = malloc(sizeof(int) * (subdivX + 1) * (subdivY + 1));
+    if (mesh == NULL || noise_map_rough == NULL || noise_map == NULL ||
+        vertices == NULL) {
+        free_mesh(mesh);
+        free(noise_map_rough);
+        free(noise_map);
+        free(vertices);
+        return NULL;
+    }
+    for (int j = 0; j <= subdivY; j++) {
+        for (int i = 0; i <= subdivX; i++) {
+            fm_vec3_t *v = &noise_map_rough[j * (subdivX + 1) + i];
+            for (int k = 0; k < 3; k++) {
+                v->v[k] = noise->v[k] * ((rand() % 20001) / 10000.0f - 1.0f);
+            }
+        }
+    }
+#define KERNELW 5
+#define KERNELH 5
+    // gaussian kernel, sigma=1
+    float kernel[KERNELH][KERNELW] = {
+        {0.00296902, 0.01330621, 0.02193823, 0.01330621, 0.00296902},
+        {0.01330621, 0.0596343, 0.09832033, 0.0596343, 0.01330621},
+        {0.02193823, 0.09832033, 0.16210282, 0.09832033, 0.02193823},
+        {0.01330621, 0.0596343, 0.09832033, 0.0596343, 0.01330621},
+        {0.00296902, 0.01330621, 0.02193823, 0.01330621, 0.00296902},
+    };
+    for (int j = 0; j <= subdivY; j++) {
+        for (int i = 0; i <= subdivX; i++) {
+            fm_vec3_t v = {0};
+            float fac = 0.0f;
+            for (int kj = 0; kj < KERNELH; kj++) {
+                for (int ki = 0; ki < KERNELW; ki++) {
+                    int ii = i + ki - KERNELW / 2 - 1;
+                    int ij = j + kj - KERNELH / 2 - 1;
+                    if (ii >= 0 && ii <= subdivX && ij >= 0 && ij <= subdivY) {
+                        fm_vec3_t tmp =
+                            noise_map_rough[ij * (subdivX + 1) + ii];
+                        fm_vec3_scale(&tmp, &tmp, kernel[kj][ki]);
+                        fm_vec3_add(&v, &v, &tmp);
+                        fac += kernel[kj][ki];
+                    }
+                }
+            }
+            fm_vec3_scale(&v, &v, 1.0f / fac);
+            noise_map[j * (subdivX + 1) + i] = v;
+        }
+    }
+    for (int j = 0; j <= subdivY; j++) {
+        for (int i = 0; i <= subdivX; i++) {
+            int k = j * (subdivX + 1) + i;
+            *add_vertex(mesh, &vertices[k]) = (fm_vec3_t){{
+                fm_lerp(from->x, to->x, (float)i / subdivX) + noise_map[k].x,
+                fm_lerp(from->y, to->y, (float)j / subdivY) + noise_map[k].y,
+                z + noise_map[k].z,
+            }};
+            float *st = mesh->st_attribute[vertices[k]];
+            st[0] = fm_lerp(st_from->x, st_to->x, (float)i / subdivX);
+            st[1] = fm_lerp(st_from->y, st_to->y, (float)j / subdivY);
+        }
+    }
+    for (int j = 0; j < subdivY; j++) {
+        for (int i = 0; i < subdivX; i++) {
+            struct geom_polygon *poly = add_polygon(mesh);
+            poly->n_vertices = 4;
+            poly->vertices[0] = vertices[j * (subdivX + 1) + i];
+            poly->vertices[1] = vertices[j * (subdivX + 1) + i + 1];
+            poly->vertices[2] = vertices[(j + 1) * (subdivX + 1) + i + 1];
+            poly->vertices[3] = vertices[(j + 1) * (subdivX + 1) + i];
+        }
+    }
+    struct primitive *primitive = geom_mesh_to_primitive_textured(mesh, 1);
+    free_mesh(mesh);
+    free(noise_map_rough);
+    free(noise_map);
+    free(vertices);
     return primitive;
 }

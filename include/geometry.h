@@ -10,6 +10,11 @@
 void geom_mesh_free_primitive(struct primitive *primitive);
 
 struct primitive *generate_tower_geometry(struct tower *tower, float scale);
-struct primitive *generate_tower_walls_geometry(struct tower *tower, float scale);
+struct primitive *generate_tower_walls_geometry(struct tower *tower,
+                                                float scale);
+struct primitive *generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to,
+                                           float z, fm_vec2_t *st_from,
+                                           fm_vec2_t *st_to, int subdivX,
+                                           int subdivY, fm_vec3_t *noise);
 
 #endif
