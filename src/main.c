@@ -390,6 +390,8 @@ int main(void) {
     } tower_climb_ctx = {0};
 
     bool is_climbing_tower = false;
+    float cam_switch_timer = 0.0f, cam_switch_timer_ini = 1.0f;
+    fm_vec3_t cam_eye, cam_target, cam_up;
 
     struct defered_primitives_free_ctx defered_primitives_free_ctx;
     defered_primitives_free_init_ctx(&defered_primitives_free_ctx);
@@ -523,7 +525,12 @@ int main(void) {
         joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
         joypad_buttons_t pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
 
-        fm_mat4_t mat_view;
+        cam_switch_timer -= dt;
+        if (cam_switch_timer < 0.0f) {
+            cam_switch_timer = 0.0f;
+        }
+
+        fm_vec3_t eye, target, up;
 
         if (is_climbing_tower) {
             /*
@@ -660,6 +667,7 @@ int main(void) {
 
             if (pressed.b) {
                 is_climbing_tower = false;
+                cam_switch_timer = cam_switch_timer_ini = 1.0f;
             }
 
             /*
@@ -676,16 +684,15 @@ int main(void) {
                 fm_lerp_angle(tower_climb_ctx.camera_eye_height,
                               tower_climb_ctx.camera_at_height, 0.1f * 60 * dt);
 
-            fm_vec3_t eye;
             fm_sincosf(tower_climb_ctx.camera_angle, &eye.y, &eye.x);
             eye.z = 0.0f;
             fm_vec3_scale(&eye, &eye, 200.0f);
             eye.z = (tower_climb_ctx.camera_eye_height + 0.5f) * 100.0f;
-            fm_vec3_t target = {
+            target = (fm_vec3_t){
                 {0, 0, (tower_climb_ctx.camera_at_height + 0.5f) * 100.0f}};
             fm_vec3_add(&eye, &eye, &towers[i_cur_tower].pos);
             fm_vec3_add(&target, &target, &towers[i_cur_tower].pos);
-            fm_mat4_lookat(&mat_view, &eye, &target, &(fm_vec3_t){{0, 0, 1}});
+            up = (fm_vec3_t){{0, 0, 1}};
         } else {
             fm_mat3_t mat;
             fm_mat3_identity(&mat);
@@ -711,6 +718,7 @@ int main(void) {
 
             if (pressed.a) {
                 is_climbing_tower = true;
+                cam_switch_timer = cam_switch_timer_ini = 1.0f;
                 int i_closest_tower = -1;
                 float closest_tower_dist = 0.0f;
                 for (int i = 0; i < ARRAY_COUNT(towers); i++) {
@@ -740,7 +748,7 @@ int main(void) {
                     0.1f * 60 * dt, FM_DEG2RAD(180.0f / 60) * 60 * dt));
             }
 
-            fm_vec3_t target = {{
+            target = (fm_vec3_t){{
                 free_roam_ctx.suzanne_x,
                 free_roam_ctx.suzanne_y,
                 SUZANNE_CHIN_Z_M * 100,
@@ -752,10 +760,25 @@ int main(void) {
                        &eyeToTarget.x);
             eyeToTarget.z = 0.0f;
             fm_vec3_scale(&eyeToTarget, &eyeToTarget, 200.0f);
-            fm_vec3_t eye;
             fm_vec3_sub(&eye, &target, &eyeToTarget);
-            fm_mat4_lookat(&mat_view, &eye, &target, &(fm_vec3_t){{0, 0, 1}});
+            up = (fm_vec3_t){{0, 0, 1}};
         }
+
+        if (cam_switch_timer == 0.0f) {
+            cam_eye = eye;
+            cam_target = target;
+            cam_up = up;
+        } else {
+            fm_vec3_lerp(&cam_eye, &cam_eye, &eye,
+                         1.0f - cam_switch_timer / cam_switch_timer_ini);
+            fm_vec3_lerp(&cam_target, &cam_target, &target,
+                         1.0f - cam_switch_timer / cam_switch_timer_ini);
+            fm_vec3_lerp(&cam_up, &cam_up, &up,
+                         1.0f - cam_switch_timer / cam_switch_timer_ini);
+        }
+
+        fm_mat4_t mat_view;
+        fm_mat4_lookat(&mat_view, &cam_eye, &cam_target, &cam_up);
 
         /*
          * Drawing
