@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 #include <assert.h>
+#include <float.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -11,6 +12,7 @@
 
 #include "geometry.h"
 #include "model.h"
+#include "polygonal_collision.h"
 #include "tower.h"
 
 #include "../assets/Suzanne.h"
@@ -21,6 +23,8 @@
 #define SUZANNE_CHIN_Z_M 0.25f
 // approximate radius of bounding sphere for Suzanne, in centimeters (units)
 #define SUZANNE_RADIUS 25.0f
+
+#define TOWER_RADIUS 100.0f
 
 #ifndef ARRAY_COUNT
 #define ARRAY_COUNT(arr) (sizeof(arr) / sizeof(arr[0]))
@@ -374,8 +378,7 @@ int main(void) {
                         Z_NEAR, Z_FAR);
 
     struct {
-        float suzanne_x;
-        float suzanne_y;
+        fm_vec3_t suzanne_pos;
         float suzanne_yaw;
         float suzanne_yaw_idle_time;
         float camera_yaw;
@@ -424,13 +427,42 @@ int main(void) {
     rspq_block_t *suzanne_block = rspq_block_end();
 
 #define GROUND_ST_SHIFT 4
-    struct primitive *ground_primitive = generate_ground_geometry(
+    struct ground_geometry_res ground_geometry_res = generate_ground_geometry(
         &(fm_vec2_t){{-1000, -1000}}, &(fm_vec2_t){{1000, 1000}}, 0,
         &(fm_vec2_t){{0, 0}},
         &(fm_vec2_t){{32 << GROUND_ST_SHIFT, 32 << GROUND_ST_SHIFT}}, 10, 10,
-        &(fm_vec3_t){{200, 200, 0}});
+        &(fm_vec3_t){{200, 200, 200}});
+    struct primitive *ground_primitive = ground_geometry_res.primitive;
+    struct polycol_mesh *ground_polycol = ground_geometry_res.polycol_mesh;
 
     data_cache_writeback_invalidate_all();
+
+    // snap tower positions to ground
+    struct {
+        float r, a;
+    } tower_ground_check_locs[] = {
+        {0.0f, 0.0f},
+        {TOWER_RADIUS, 0.0f},
+        {TOWER_RADIUS, FM_PI / 2},
+        {TOWER_RADIUS, FM_PI},
+        {TOWER_RADIUS, FM_PI * 3 / 2},
+    };
+    for (int i = 0; i < ARRAY_COUNT(towers); i++) {
+        float z = -FLT_MAX;
+        for (int j = 0; j < ARRAY_COUNT(tower_ground_check_locs); j++) {
+            fm_vec3_t pos;
+            fm_sincosf(tower_ground_check_locs[j].a, &pos.y, &pos.x);
+            pos.z = 0.0f;
+            fm_vec3_scale(&pos, &pos, tower_ground_check_locs[j].r);
+            fm_vec3_add(&pos, &pos, &towers[i].pos);
+            pos.z = FLT_MAX;
+            float loc_z;
+            if (polycol_raycast_down(ground_polycol, &pos, &loc_z)) {
+                z = MAX(z, loc_z);
+            }
+        }
+        towers[i].pos.z = z;
+    }
 
     rspq_block_begin();
     draw_primitive(ground_primitive);
@@ -501,7 +533,6 @@ int main(void) {
             build_tower_walls(towers[i].tower);
 
             // Generate the primitives that will be drawn
-#define TOWER_RADIUS 100.0f
             towers[i].tower_primitive =
                 generate_tower_geometry(towers[i].tower, TOWER_RADIUS);
             assert(towers[i].tower_primitive != NULL);
@@ -708,8 +739,8 @@ int main(void) {
             fm_mat3_mul_vec2(
                 &d, &mat,
                 &(fm_vec2_t){{inputs.stick_x * f, inputs.stick_y * f}});
-            free_roam_ctx.suzanne_x += d.x;
-            free_roam_ctx.suzanne_y += d.y;
+            free_roam_ctx.suzanne_pos.x += d.x;
+            free_roam_ctx.suzanne_pos.y += d.y;
             if (fm_vec2_len(&(fm_vec2_t){{inputs.stick_x, inputs.stick_y}}) >
                 20) {
                 // atan2(stick_y, stick_x) gives an angle from +x (rightward)
@@ -726,9 +757,7 @@ int main(void) {
             float closest_tower_dist = 0.0f;
             for (int i = 0; i < ARRAY_COUNT(towers); i++) {
                 fm_vec3_t diff;
-                fm_vec3_sub(&diff, &towers[i].pos,
-                            &(fm_vec3_t){{free_roam_ctx.suzanne_x,
-                                          free_roam_ctx.suzanne_y, 0}});
+                fm_vec3_sub(&diff, &towers[i].pos, &free_roam_ctx.suzanne_pos);
                 float dist = fm_vec3_len(&diff);
                 if (i_closest_tower == -1 || dist < closest_tower_dist) {
                     i_closest_tower = i;
@@ -740,8 +769,8 @@ int main(void) {
                 if (closest_tower_dist > FM_EPSILON) {
                     fm_vec2_sub(&diff,
                                 &(fm_vec2_t){{
-                                    free_roam_ctx.suzanne_x,
-                                    free_roam_ctx.suzanne_y,
+                                    free_roam_ctx.suzanne_pos.x,
+                                    free_roam_ctx.suzanne_pos.y,
                                 }},
                                 &(fm_vec2_t){{
                                     towers[i_closest_tower].pos.x,
@@ -760,8 +789,17 @@ int main(void) {
                                 towers[i_closest_tower].pos.y,
                             }},
                             &diff);
-                free_roam_ctx.suzanne_x = pos.x;
-                free_roam_ctx.suzanne_y = pos.y;
+                free_roam_ctx.suzanne_pos.x = pos.x;
+                free_roam_ctx.suzanne_pos.y = pos.y;
+            }
+
+            float intersectZ;
+            fm_vec3_t raycast_from = free_roam_ctx.suzanne_pos;
+            raycast_from.z += SUZANNE_CHIN_Z_M * 100.0f;
+            bool hit = polycol_raycast_down(ground_polycol, &raycast_from,
+                                            &intersectZ);
+            if (hit) {
+                free_roam_ctx.suzanne_pos.z = intersectZ;
             }
 
             if (pressed.a &&
@@ -774,8 +812,8 @@ int main(void) {
                     fm_vec2_t diff;
                     fm_vec2_sub(&diff,
                                 &(fm_vec2_t){{
-                                    free_roam_ctx.suzanne_x,
-                                    free_roam_ctx.suzanne_y,
+                                    free_roam_ctx.suzanne_pos.x,
+                                    free_roam_ctx.suzanne_pos.y,
                                 }},
                                 &(fm_vec2_t){{
                                     towers[i_closest_tower].pos.x,
@@ -800,11 +838,8 @@ int main(void) {
                     0.1f * 60 * dt, FM_DEG2RAD(180.0f / 60) * 60 * dt));
             }
 
-            target = (fm_vec3_t){{
-                free_roam_ctx.suzanne_x,
-                free_roam_ctx.suzanne_y,
-                SUZANNE_CHIN_Z_M * 100,
-            }};
+            target = free_roam_ctx.suzanne_pos;
+            target.z += SUZANNE_CHIN_Z_M * 100;
             fm_vec3_t eyeToTarget;
             // camera_yaw = 0 -> (0,1) (forward)
             // camera_yaw = pi/2 -> (-1,0) (leftward)
@@ -897,11 +932,8 @@ int main(void) {
                 fm_quat_from_euler_zyx(&rotation, 0.0f, 0.0f,
                                        free_roam_ctx.suzanne_yaw + FM_PI);
                 fm_mat4_rotate(&mat_model, &rotation);
-                fm_vec3_t translate = {{
-                    free_roam_ctx.suzanne_x,
-                    free_roam_ctx.suzanne_y,
-                    SUZANNE_CHIN_Z_M * 100,
-                }};
+                fm_vec3_t translate = free_roam_ctx.suzanne_pos;
+                translate.z += SUZANNE_CHIN_Z_M * 100;
                 fm_mat4_translate(&mat_model, &translate);
             }
             mgfx_matrices_t *ud_matrices =

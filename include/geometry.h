@@ -5,6 +5,7 @@
 #define CYLABY_GEOMETRY_H
 
 #include "model.h"
+#include "polygonal_collision.h"
 #include "tower.h"
 
 void geom_mesh_free_primitive(struct primitive *primitive);
@@ -12,9 +13,14 @@ void geom_mesh_free_primitive(struct primitive *primitive);
 struct primitive *generate_tower_geometry(struct tower *tower, float scale);
 struct primitive *generate_tower_walls_geometry(struct tower *tower,
                                                 float scale);
-struct primitive *generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to,
-                                           float z, fm_vec2_t *st_from,
-                                           fm_vec2_t *st_to, int subdivX,
-                                           int subdivY, fm_vec3_t *noise);
+
+struct ground_geometry_res {
+    struct primitive *primitive;
+    struct polycol_mesh *polycol_mesh;
+};
+struct ground_geometry_res
+generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to, float z,
+                         fm_vec2_t *st_from, fm_vec2_t *st_to, int subdivX,
+                         int subdivY, fm_vec3_t *noise);
 
 #endif

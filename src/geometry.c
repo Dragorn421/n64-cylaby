@@ -10,6 +10,7 @@
 
 #include "geometry.h"
 #include "model.h"
+#include "polygonal_collision.h"
 #include "tower.h"
 
 /*
@@ -280,6 +281,38 @@ void geom_mesh_free_primitive(struct primitive *primitive) {
     free(primitive);
 }
 
+struct polycol_mesh *geom_mesh_to_polycol_mesh(struct geom_mesh *mesh,
+                                               float scale) {
+    int n_triangles = 0;
+    for (int i = 0; i < mesh->n_polygons; i++) {
+        if (mesh->polygons[i].n_vertices >= 3) {
+            n_triangles += mesh->polygons[i].n_vertices - 2;
+        }
+    }
+    fm_vec3_t(*tris)[3] = malloc(sizeof(fm_vec3_t[3]) * n_triangles);
+    if (tris == NULL) {
+        return NULL;
+    }
+    int i_tri = 0;
+    for (int i = 0; i < mesh->n_polygons; i++) {
+        struct geom_polygon *polygon = &mesh->polygons[i];
+        for (int j = 0; j < polygon->n_vertices - 2; j++) {
+            int tri_verts[3] = {
+                polygon->vertices[0],
+                polygon->vertices[j + 1],
+                polygon->vertices[j + 2],
+            };
+            for (int k = 0; k < 3; k++) {
+                tris[i_tri][k] = mesh->vertices[tri_verts[k]];
+            }
+            i_tri++;
+        }
+    }
+    struct polycol_mesh *polycol_mesh = polycol_mesh_new(tris, n_triangles);
+    free(tris);
+    return polycol_mesh;
+}
+
 void generate_tower_geometry_floor(struct geom_mesh *mesh,
                                    int segments_per_floor, int floor,
                                    int corridor) {
@@ -426,10 +459,10 @@ struct primitive *generate_tower_walls_geometry(struct tower *tower,
     return primitive;
 }
 
-struct primitive *generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to,
-                                           float z, fm_vec2_t *st_from,
-                                           fm_vec2_t *st_to, int subdivX,
-                                           int subdivY, fm_vec3_t *noise) {
+struct ground_geometry_res
+generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to, float z,
+                         fm_vec2_t *st_from, fm_vec2_t *st_to, int subdivX,
+                         int subdivY, fm_vec3_t *noise) {
     struct geom_mesh *mesh = malloc_mesh(16, 16, true);
     fm_vec3_t *noise_map_rough =
         malloc(sizeof(fm_vec3_t) * (subdivX + 1) * (subdivY + 1));
@@ -442,7 +475,7 @@ struct primitive *generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to,
         free(noise_map_rough);
         free(noise_map);
         free(vertices);
-        return NULL;
+        return (struct ground_geometry_res){NULL, NULL};
     }
     for (int j = 0; j <= subdivY; j++) {
         for (int i = 0; i <= subdivX; i++) {
@@ -507,9 +540,13 @@ struct primitive *generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to,
         }
     }
     struct primitive *primitive = geom_mesh_to_primitive_textured(mesh, 1);
+    struct polycol_mesh *polycol_mesh = geom_mesh_to_polycol_mesh(mesh, 1);
     free_mesh(mesh);
     free(noise_map_rough);
     free(noise_map);
     free(vertices);
-    return primitive;
+    return (struct ground_geometry_res){
+        primitive,
+        polycol_mesh,
+    };
 }
