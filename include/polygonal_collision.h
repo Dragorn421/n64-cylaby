@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Dragorn421
+// SPDX-License-Identifier: CC0-1.0
+
 #ifndef CYLABY_POLYGONAL_COLLISION_H
 #define CYLABY_POLYGONAL_COLLISION_H
 
