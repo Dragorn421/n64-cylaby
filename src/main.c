@@ -956,6 +956,8 @@ int main(void) {
                 continue;
             }
             // Draw the tower
+            mg_set_culling(
+                &(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_BACK});
             rdpq_set_prim_color((color_t){100, 100, 255, 255});
             {
                 fm_mat4_t mat_model;
@@ -992,7 +994,7 @@ int main(void) {
 
         mg_pipeline_bind(textured_pipeline);
 
-        mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
+        mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_BACK});
 
         mg_set_geometry_flags(MG_GEOMETRY_FLAGS_TEX_ENABLED |
                               MG_GEOMETRY_FLAGS_Z_ENABLED);
