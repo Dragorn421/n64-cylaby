@@ -370,6 +370,11 @@ void generate_tower_geometry_floor(struct geom_mesh *mesh,
 
 struct primitive *generate_tower_geometry(struct tower *tower, float scale) {
     struct geom_mesh *mesh = malloc_mesh(16, 16, false);
+
+    // generate "basement" (-1) floor geometry
+    // so that towers don't look like they float above ground
+    generate_tower_geometry_floor(mesh, tower->segments_per_floor, -1, -1);
+
     for (int i = 0; i < tower->n_floors; i++) {
         generate_tower_geometry_floor(mesh, tower->segments_per_floor, i,
                                       tower->floors[i].corridor);
