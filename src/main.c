@@ -848,6 +848,13 @@ int main(void) {
             eyeToTarget.z = 0.0f;
             fm_vec3_scale(&eyeToTarget, &eyeToTarget, 200.0f);
             fm_vec3_sub(&eye, &target, &eyeToTarget);
+            fm_vec3_t eye_raycast_from = eye;
+            eye_raycast_from.z += 100.0f;
+            float eye_ground_z;
+            if (polycol_raycast_down(ground_polycol, &eye_raycast_from,
+                                     &eye_ground_z)) {
+                eye.z = MAX(eye.z, eye_ground_z + 10.0f);
+            }
             up = (fm_vec3_t){{0, 0, 1}};
         }
 
