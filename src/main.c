@@ -41,7 +41,7 @@ struct GfxCtx {
      * This buffer holds matrices uniforms generated every frame.
      * The next free index in the buffer is stored in i_ud_mat_buf.
      */
-    mgfx_matrices_t ud_mat_buf[10];
+    mgfx_matrices_t ud_mat_buf[40];
     int i_ud_mat_buf;
     /**
      * This buffer keeps track of the (dynamically allocated) primitives used by
@@ -427,18 +427,23 @@ int main(void) {
     draw_primitive(&Suzanne_0);
     rspq_block_t *suzanne_block = rspq_block_end();
 
+#define GROUND_EXTENT 1000
 #define GROUND_ST_SHIFT 4
     struct ground_geometry_res ground_geometry_res = generate_ground_geometry(
-        &(fm_vec2_t){{-1000, -1000}}, &(fm_vec2_t){{1000, 1000}}, 0,
-        &(fm_vec2_t){{0, 0}},
+        &(fm_vec2_t){{-GROUND_EXTENT, -GROUND_EXTENT}},
+        &(fm_vec2_t){{GROUND_EXTENT, GROUND_EXTENT}}, 0, &(fm_vec2_t){{0, 0}},
         &(fm_vec2_t){{32 << GROUND_ST_SHIFT, 32 << GROUND_ST_SHIFT}}, 10, 10,
         &(fm_vec3_t){{200, 200, 200}});
     struct primitive *ground_primitive = ground_geometry_res.primitive;
     struct polycol_mesh *ground_polycol = ground_geometry_res.polycol_mesh;
 
+    bool success;
+
     struct generate_ground_texture_res ground_tex_res;
-    bool success = generate_ground_texture(&ground_tex_res);
+    success = generate_ground_texture(&ground_tex_res);
     assert(success);
+
+    struct primitive *flower_primitive = generate_flower_geometry(50.0f);
 
     data_cache_writeback_invalidate_all();
 
@@ -472,6 +477,42 @@ int main(void) {
     rspq_block_begin();
     draw_primitive(ground_primitive);
     rspq_block_t *ground_block = rspq_block_end();
+
+    struct {
+        fm_vec3_t pos;
+        struct generate_flower_texture_res flower_tex_res;
+    } flowers[30];
+
+    for (int i = 0; i < ARRAY_COUNT(flowers); i++) {
+        float x, y;
+        while (true) {
+            x = rand() % (2 * GROUND_EXTENT + 1) - GROUND_EXTENT;
+            y = rand() % (2 * GROUND_EXTENT + 1) - GROUND_EXTENT;
+            bool too_close_to_a_tower = false;
+            for (int j = 0; j < ARRAY_COUNT(towers); j++) {
+                fm_vec2_t vec;
+                fm_vec2_sub(&vec, &(fm_vec2_t){{x, y}},
+                            &(fm_vec2_t){{towers[j].pos.x, towers[j].pos.y}});
+                if (fm_vec2_len(&vec) < TOWER_RADIUS + 40.0f) {
+                    too_close_to_a_tower = true;
+                }
+            }
+            if (!too_close_to_a_tower) {
+                break;
+            }
+        }
+        float z = 0.0f;
+        polycol_raycast_down(ground_polycol, &(fm_vec3_t){{x, y, FLT_MAX}}, &z);
+        flowers[i].pos.x = x;
+        flowers[i].pos.y = y;
+        flowers[i].pos.z = z - 2.0f;
+        success = generate_flower_texture(&flowers[i].flower_tex_res);
+        assert(success);
+    }
+
+    rspq_block_begin();
+    draw_primitive(flower_primitive);
+    rspq_block_t *flower_block = rspq_block_end();
 
     while (true) {
         // get and initialize GfxCtx
@@ -1037,6 +1078,40 @@ int main(void) {
             mg_uniform_load(textured_u_matrices, textured_ud_matrices);
 
             rspq_block_run(ground_block);
+        }
+
+        mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_BACK});
+        rdpq_mode_begin();
+        rdpq_set_mode_standard();
+        rdpq_mode_antialias(AA_STANDARD);
+        rdpq_mode_dithering(DITHER_SQUARE_SQUARE);
+        rdpq_mode_zbuf(true, true);
+        rdpq_mode_persp(true);
+        rdpq_mode_filter(FILTER_BILINEAR);
+        rdpq_mode_combiner(RDPQ_COMBINER_TEX);
+        rdpq_mode_alphacompare(100);
+        rdpq_mode_tlut(TLUT_RGBA16);
+        rdpq_mode_end();
+        for (int i = 0; i < ARRAY_COUNT(flowers); i++) {
+            fm_mat4_t mat_model;
+            fm_mat4_identity(&mat_model);
+            fm_quat_t rotation;
+            fm_quat_from_euler_zyx(
+                &rotation, 0, 0,
+                is_climbing_tower ? (tower_climb_ctx.camera_angle - FM_PI / 2)
+                                  : (free_roam_ctx.camera_yaw + FM_PI));
+            fm_mat4_rotate(&mat_model, &rotation);
+            fm_mat4_translate(&mat_model, &flowers[i].pos);
+            mgfx_matrices_t *textured_ud_matrices =
+                build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
+
+            mg_uniform_load(textured_u_matrices, textured_ud_matrices);
+
+            rdpq_tex_upload_tlut(flowers[i].flower_tex_res.tlut, 0,
+                                 flowers[i].flower_tex_res.tlut_count);
+            rdpq_tex_upload(TILE0, &flowers[i].flower_tex_res.tex,
+                            &(rdpq_texparms_t){});
+            rspq_block_run(flower_block);
         }
 
         if (is_climbing_tower) {

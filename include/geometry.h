@@ -23,4 +23,6 @@ generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to, float z,
                          fm_vec2_t *st_from, fm_vec2_t *st_to, int subdivX,
                          int subdivY, fm_vec3_t *noise);
 
+struct primitive *generate_flower_geometry(float h);
+
 #endif

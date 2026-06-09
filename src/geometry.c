@@ -555,3 +555,29 @@ generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to, float z,
         polycol_mesh,
     };
 }
+
+struct primitive *generate_flower_geometry(float h) {
+    struct geom_mesh *mesh = malloc_mesh(4, 1, true);
+    int i_a, i_b, i_c, i_d;
+    *add_vertex(mesh, &i_a) = (fm_vec3_t){{-h / 85 * 48 / 2, 0.0f, 0.0f}};
+    *add_vertex(mesh, &i_b) = (fm_vec3_t){{-h / 85 * 48 / 2, 0.0f, h}};
+    *add_vertex(mesh, &i_c) = (fm_vec3_t){{h / 85 * 48 / 2, 0.0f, h}};
+    *add_vertex(mesh, &i_d) = (fm_vec3_t){{h / 85 * 48 / 2, 0.0f, 0.0f}};
+    mesh->st_attribute[i_c][0] = 0;
+    mesh->st_attribute[i_c][1] = 0;
+    mesh->st_attribute[i_b][0] = 48;
+    mesh->st_attribute[i_b][1] = 0;
+    mesh->st_attribute[i_d][0] = 0;
+    mesh->st_attribute[i_d][1] = 85;
+    mesh->st_attribute[i_a][0] = 48;
+    mesh->st_attribute[i_a][1] = 85;
+    struct geom_polygon *poly = add_polygon(mesh);
+    poly->n_vertices = 4;
+    poly->vertices[0] = i_a;
+    poly->vertices[1] = i_b;
+    poly->vertices[2] = i_c;
+    poly->vertices[3] = i_d;
+    struct primitive *primitive = geom_mesh_to_primitive_textured(mesh, 1.0f);
+    free_mesh(mesh);
+    return primitive;
+}
