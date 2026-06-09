@@ -13,6 +13,7 @@
 #include "geometry.h"
 #include "model.h"
 #include "polygonal_collision.h"
+#include "texture_gen.h"
 #include "tower.h"
 
 #include "../assets/Suzanne.h"
@@ -434,6 +435,10 @@ int main(void) {
         &(fm_vec3_t){{200, 200, 200}});
     struct primitive *ground_primitive = ground_geometry_res.primitive;
     struct polycol_mesh *ground_polycol = ground_geometry_res.polycol_mesh;
+
+    struct generate_ground_texture_res ground_tex_res;
+    bool success = generate_ground_texture(&ground_tex_res);
+    assert(success);
 
     data_cache_writeback_invalidate_all();
 
@@ -1002,30 +1007,25 @@ int main(void) {
         mg_uniform_load(textured_u_fog, &textured_ud_fog);
         mg_uniform_load(textured_u_texturing, &textured_ud_texturing);
 
-        rdpq_mode_combiner(RDPQ_COMBINER_TEX);
+        rdpq_mode_combiner(RDPQ_COMBINER1((TEX0, 0, TEX1, 0), (0, 0, 0, 1)));
         rdpq_mode_persp(true);
-        rdpq_mode_filter(FILTER_POINT);
-        static surface_t texsurf_buf;
-        static surface_t *texsurf = NULL;
-        if (texsurf == NULL) {
-            // texsurf = surface_make_linear(main, FMT_RGBA16, 32, 32);
-            texsurf_buf = surface_alloc(FMT_RGBA16, 32, 32);
-            texsurf = &texsurf_buf;
-            for (int i = 0; i < 32; i++) {
-                for (int j = 0; j < 32; j++) {
-                    ((uint16_t *)texsurf->buffer)[i * 32 + j] =
-                        (i + j) % 2 == 0 ? 0xF801 : 0xFFFF;
-                }
-            }
-            data_cache_writeback_invalidate_all();
-        }
-        rdpq_tex_upload(TILE0, texsurf,
+        rdpq_mode_filter(FILTER_BILINEAR);
+        rdpq_tex_multi_begin();
+        rdpq_tex_upload(TILE0, &ground_tex_res.multitex_color,
                         &(rdpq_texparms_t){
                             .s.repeats = REPEAT_INFINITE,
                             .t.repeats = REPEAT_INFINITE,
                             .s.scale_log = GROUND_ST_SHIFT,
                             .t.scale_log = GROUND_ST_SHIFT,
                         });
+        rdpq_tex_upload(TILE1, &ground_tex_res.multitex_gray,
+                        &(rdpq_texparms_t){
+                            .s.repeats = REPEAT_INFINITE,
+                            .t.repeats = REPEAT_INFINITE,
+                            .s.scale_log = GROUND_ST_SHIFT - 4,
+                            .t.scale_log = GROUND_ST_SHIFT - 4,
+                        });
+        rdpq_tex_multi_end();
         {
             fm_mat4_t mat_model;
             fm_mat4_identity(&mat_model);
