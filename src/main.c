@@ -937,9 +937,9 @@ int main(void) {
         rdpq_attach(surf, display_get_zbuf());
 
         rdpq_clear((color_t){
-            100,
-            200,
-            80 + 20 * cosf(t * 2 * FM_PI / 5000),
+            94,
+            169,
+            227,
             255,
         });
         rdpq_clear_z(ZBUF_MAX);
