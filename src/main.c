@@ -357,6 +357,8 @@ int main(void) {
         mg_pipeline_get_uniform(textured_pipeline, MGFX_BINDING_FOG);
     const mg_uniform_t *textured_u_texturing =
         mg_pipeline_get_uniform(textured_pipeline, MGFX_BINDING_TEXTURING);
+    const mg_uniform_t *textured_u_lighting =
+        mg_pipeline_get_uniform(textured_pipeline, MGFX_BINDING_LIGHTING);
     const mg_uniform_t *textured_u_matrices =
         mg_pipeline_get_uniform(textured_pipeline, MGFX_BINDING_MATRICES);
 
@@ -412,6 +414,7 @@ int main(void) {
         struct primitive *tower_walls_primitive;
         rspq_block_t *tower_block;
         rspq_block_t *tower_walls_block;
+        struct generate_brick_texture_res tex;
         bool rebuild_tower;
         fm_vec3_t pos;
     } towers[3] = {0};
@@ -553,6 +556,10 @@ int main(void) {
                                         towers[i].tower_walls_block);
                 towers[i].tower_walls_block = NULL;
             }
+            if (towers[i].tex.tex.buffer != NULL) {
+                free(towers[i].tex.tex.buffer);
+                towers[i].tex.tex.buffer = NULL;
+            }
 
             // malloc the tower data, with unset walls
             towers[i].tower =
@@ -585,6 +592,9 @@ int main(void) {
             towers[i].tower_walls_primitive =
                 generate_tower_walls_geometry(towers[i].tower, TOWER_RADIUS);
             assert(towers[i].tower_walls_primitive != NULL);
+
+            success = generate_brick_texture(&towers[i].tex, 64, 32);
+            assert(success);
 
             data_cache_writeback_invalidate_all();
 
@@ -1001,24 +1011,6 @@ int main(void) {
             if (towers[i].tower == NULL) {
                 continue;
             }
-            // Draw the tower
-            mg_set_culling(
-                &(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_BACK});
-            rdpq_set_prim_color((color_t){100, 100, 255, 255});
-            {
-                fm_mat4_t mat_model;
-                fm_mat4_identity(&mat_model);
-                fm_mat4_translate(&mat_model, &towers[i].pos);
-                mgfx_matrices_t *ud_matrices = build_matrices(
-                    gfx_ctx, &mat_projection, &mat_view, &mat_model);
-
-                mg_uniform_load(u_matrices, ud_matrices);
-
-                add_used_primitive(gfx_ctx, towers[i].tower_primitive);
-                add_used_block(gfx_ctx, towers[i].tower_block);
-                rspq_block_run(towers[i].tower_block);
-            }
-
             // Draw the tower walls
             mg_set_culling(
                 &(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
@@ -1043,10 +1035,48 @@ int main(void) {
         mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_BACK});
 
         mg_set_geometry_flags(MG_GEOMETRY_FLAGS_TEX_ENABLED |
+                              MG_GEOMETRY_FLAGS_SHADE_ENABLED |
                               MG_GEOMETRY_FLAGS_Z_ENABLED);
 
         mg_uniform_load(textured_u_fog, &textured_ud_fog);
         mg_uniform_load(textured_u_texturing, &textured_ud_texturing);
+        mg_uniform_load(textured_u_lighting, &ud_lighting);
+
+        rdpq_mode_combiner(RDPQ_COMBINER_TEX_SHADE);
+        rdpq_mode_persp(true);
+        rdpq_mode_filter(FILTER_BILINEAR);
+        for (int i = 0; i < ARRAY_COUNT(towers); i++) {
+            if (towers[i].tower == NULL) {
+                continue;
+            }
+            // Draw the tower
+            mg_set_culling(
+                &(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_BACK});
+            rdpq_set_prim_color((color_t){100, 100, 255, 255});
+            {
+                fm_mat4_t mat_model;
+                fm_mat4_identity(&mat_model);
+                fm_mat4_translate(&mat_model, &towers[i].pos);
+                mgfx_matrices_t *ud_matrices = build_matrices(
+                    gfx_ctx, &mat_projection, &mat_view, &mat_model);
+
+                mg_uniform_load(u_matrices, ud_matrices);
+
+                add_used_primitive(gfx_ctx, towers[i].tower_primitive);
+                add_used_block(gfx_ctx, towers[i].tower_block);
+                rdpq_tex_upload(TILE0, &towers[i].tex.tex,
+                                &(rdpq_texparms_t){
+                                    .s.repeats = REPEAT_INFINITE,
+                                    .s.scale_log = 0,
+                                    .t.repeats = REPEAT_INFINITE,
+                                    .t.scale_log = -1,
+                                });
+                rspq_block_run(towers[i].tower_block);
+            }
+        }
+
+        mg_set_geometry_flags(MG_GEOMETRY_FLAGS_TEX_ENABLED |
+                              MG_GEOMETRY_FLAGS_Z_ENABLED);
 
         rdpq_mode_combiner(RDPQ_COMBINER1((TEX0, 0, TEX1, 0), (0, 0, 0, 1)));
         rdpq_mode_persp(true);

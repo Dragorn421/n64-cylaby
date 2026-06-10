@@ -1,11 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Dragorn421
 // SPDX-License-Identifier: CC0-1.0
 
+#include <float.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
 #include "texture_gen.h"
+
+#ifndef ARRAY_COUNT
+#define ARRAY_COUNT(arr) (sizeof(arr) / sizeof(arr[0]))
+#endif
 
 bool generate_ground_texture(struct generate_ground_texture_res *res) {
     float colors[4][3] = {
@@ -193,5 +198,182 @@ bool generate_flower_texture(struct generate_flower_texture_res *res) {
     res->tex = surface_make_linear(im_ci4, FMT_CI4, width, height);
     res->tlut = tlut_alphabled_malloced;
     res->tlut_count = tlut_count_alphabled;
+    return true;
+}
+
+/**
+ * wrap x into [-y/2,y/2]
+ */
+static float wrap_scalar(float x, float y) {
+    x = fm_fmodf(x, y);
+    if (x < -y / 2) {
+        x += y;
+    } else if (x > y / 2) {
+        x -= y;
+    }
+    return x;
+}
+
+bool generate_brick_texture(struct generate_brick_texture_res *res, int w,
+                            int h) {
+    float brick_width = w / fm_roundf(w / 13.0f);
+    float brick_height = h / fm_roundf(h / 6.0f);
+
+    int len_buf_points = 16;
+    float (*points)[2] = malloc(sizeof(float[2]) * len_buf_points);
+    if (points == NULL) {
+        return false;
+    }
+    int n_points = 0;
+
+    {
+        float x = 0;
+        float y = brick_height / 2;
+        while (y < h) {
+            x = fm_fmodf(x + brick_width / 2, brick_width);
+            while (x < w) {
+                if (n_points == len_buf_points) {
+                    len_buf_points *= 2;
+                    void *tmp =
+                        realloc(points, sizeof(float[2]) * len_buf_points);
+                    if (tmp == NULL) {
+                        free(points);
+                        return false;
+                    }
+                    points = tmp;
+                }
+                assert(n_points < len_buf_points);
+                points[n_points][0] = x + uniform(-1.0f, 1.0f);
+                points[n_points][1] = y + uniform(-1.0f, 1.0f);
+                n_points++;
+                x += brick_width;
+            }
+            y += brick_height;
+        }
+    }
+
+    float coeff_x = 1 / brick_width;
+    float coeff_y = 1 / brick_height;
+
+    int *voronoi = malloc(sizeof(int) * w * h);
+    if (voronoi == NULL) {
+        free(points);
+        return false;
+    }
+
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            int closest_point_index = -1;
+            float closest_point_dist = FLT_MAX;
+            float second_closest_point_dist = FLT_MAX;
+            for (int i_point = 0; i_point < n_points; i_point++) {
+                float dx = wrap_scalar(x - points[i_point][0], w);
+                float dy = wrap_scalar(y - points[i_point][1], h);
+                float dist = MAX(fabsf(dx * coeff_x), fabsf(dy * coeff_y));
+                if (dist < closest_point_dist) {
+                    second_closest_point_dist = closest_point_dist;
+                    closest_point_index = i_point;
+                    closest_point_dist = dist;
+                } else if (dist < second_closest_point_dist) {
+                    second_closest_point_dist = dist;
+                }
+            }
+            if (fabsf(closest_point_dist - second_closest_point_dist) < 0.17) {
+                voronoi[y * w + x] = -1;
+            } else {
+                voronoi[y * w + x] = closest_point_index;
+            }
+        }
+    }
+
+    free(points);
+
+    float brick_colors[][3] = {
+        {183 / 255.0f, 115 / 255.0f, 92 / 255.0f},
+        {170 / 255.0f, 98 / 255.0f, 76 / 255.0f},
+        {120 / 255.0f, 81 / 255.0f, 68 / 255.0f},
+        {187 / 255.0f, 123 / 255.0f, 101 / 255.0f},
+        {194 / 255.0f, 138 / 255.0f, 118 / 255.0f},
+        {184 / 255.0f, 116 / 255.0f, 91 / 255.0f},
+        {200 / 255.0f, 139 / 255.0f, 118 / 255.0f},
+    };
+    float mortar_color[3] = {202 / 255.0f, 190 / 255.0f, 183 / 255.0f};
+
+    float (*im)[3] = malloc(sizeof(float[3]) * w * h);
+    float *noise[3] = {
+        malloc(sizeof(float) * w * h),
+        malloc(sizeof(float) * w * h),
+        malloc(sizeof(float) * w * h),
+    };
+    float *noise_smooth[3] = {
+        malloc(sizeof(float) * w * h),
+        malloc(sizeof(float) * w * h),
+        malloc(sizeof(float) * w * h),
+    };
+    int *i_color_by_island = malloc(sizeof(int) * n_points);
+    if (im == NULL || noise[0] == NULL || noise[1] == NULL ||
+        noise[2] == NULL || noise_smooth[0] == NULL ||
+        noise_smooth[1] == NULL || noise_smooth[2] == NULL ||
+        i_color_by_island == NULL) {
+        free(voronoi);
+        free(im);
+        free(noise[0]);
+        free(noise[1]);
+        free(noise[2]);
+        free(noise_smooth[0]);
+        free(noise_smooth[1]);
+        free(noise_smooth[2]);
+        free(i_color_by_island);
+    }
+
+    float kernel[3][3];
+    gaussian_kernel(kernel[0], 3, 3, 0.7f);
+    for (int c = 0; c < 3; c++) {
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                noise[c][y * w + x] = uniform(-0.08f, 0.08f);
+            }
+        }
+        apply_kernel_wrap(noise_smooth[c], noise[c], w, h, kernel[0], 3, 3);
+    }
+
+    free(noise[0]);
+    free(noise[1]);
+    free(noise[2]);
+
+    for (int i = 0; i < n_points; i++) {
+        i_color_by_island[i] = rand() % ARRAY_COUNT(brick_colors);
+    }
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            float *color;
+            if (voronoi[y * w + x] == -1) {
+                color = mortar_color;
+            } else {
+                color = brick_colors[i_color_by_island[voronoi[y * w + x]]];
+            }
+            for (int c = 0; c < 3; c++) {
+                float f = color[c] + noise_smooth[c][y * w + x];
+                im[y * w + x][c] = CLAMP(f, 0.0f, 1.0f);
+            }
+        }
+    }
+
+    free(voronoi);
+    free(noise_smooth[0]);
+    free(noise_smooth[1]);
+    free(noise_smooth[2]);
+    free(i_color_by_island);
+
+    void *im_rgba16 = malloc(w * h * 2);
+    if (im_rgba16 == NULL) {
+        free(im);
+        return false;
+    }
+    tex_float_rgb_to_rgba16(im_rgba16, im, w, h);
+
+    free(im);
+
+    res->tex = surface_make_linear(im_rgba16, FMT_RGBA16, w, h);
     return true;
 }

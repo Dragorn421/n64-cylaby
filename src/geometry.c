@@ -134,7 +134,7 @@ struct geom_polygon *add_polygon(struct geom_mesh *mesh) {
  * Returns true on success.
  */
 bool add_quad(struct geom_mesh *mesh, fm_vec3_t *a, fm_vec3_t *b, fm_vec3_t *c,
-              fm_vec3_t *d) {
+              fm_vec3_t *d, float (*st)[2]) {
     int i_a, i_b, i_c, i_d;
     fm_vec3_t *v_a, *v_b, *v_c, *v_d;
     v_a = add_vertex(mesh, &i_a);
@@ -165,6 +165,13 @@ bool add_quad(struct geom_mesh *mesh, fm_vec3_t *a, fm_vec3_t *b, fm_vec3_t *c,
         {i_a, i_b, i_c, i_d},
         4,
     };
+    if (st != NULL) {
+        assert(mesh->st_attribute != NULL);
+        memcpy(mesh->st_attribute[i_a], st[0], sizeof(float[2]));
+        memcpy(mesh->st_attribute[i_b], st[1], sizeof(float[2]));
+        memcpy(mesh->st_attribute[i_c], st[2], sizeof(float[2]));
+        memcpy(mesh->st_attribute[i_d], st[3], sizeof(float[2]));
+    }
     return true;
 }
 
@@ -338,17 +345,35 @@ void generate_tower_geometry_floor(struct geom_mesh *mesh,
                 fm_vec3_lerp(&b2, &b, &fc, 0.2f);
                 fm_vec3_lerp(&c2, &c, &fc, 0.2f);
                 fm_vec3_lerp(&d2, &d, &fc, 0.2f);
-                add_quad(mesh, &a, &b, &b2, &a2);
-                add_quad(mesh, &b, &c, &c2, &b2);
-                add_quad(mesh, &c, &d, &d2, &c2);
-                add_quad(mesh, &d, &a, &a2, &d2);
+                add_quad(mesh, &a, &b, &b2, &a2, (float[4][2]){0});
+                add_quad(mesh, &b, &c, &c2, &b2, (float[4][2]){0});
+                add_quad(mesh, &c, &d, &d2, &c2, (float[4][2]){0});
+                add_quad(mesh, &d, &a, &a2, &d2, (float[4][2]){0});
                 corridor_verts[n_corridor_verts].a2 = a2;
                 corridor_verts[n_corridor_verts].b2 = b2;
                 corridor_verts[n_corridor_verts].c2 = c2;
                 corridor_verts[n_corridor_verts].d2 = d2;
                 n_corridor_verts++;
             } else {
-                add_quad(mesh, &a, &b, &c, &d);
+                add_quad(mesh, &a, &b, &c, &d,
+                         (float[4][2]){
+                             {
+                                 i * 64.0f,
+                                 floor * 32.0f,
+                             },
+                             {
+                                 (i + 1) * 64.0f,
+                                 floor * 32.0f,
+                             },
+                             {
+                                 (i + 1) * 64.0f,
+                                 (floor + 1) * 32.0f,
+                             },
+                             {
+                                 i * 64.0f,
+                                 (floor + 1) * 32.0f,
+                             },
+                         });
             }
         }
         a = b;
@@ -361,15 +386,15 @@ void generate_tower_geometry_floor(struct geom_mesh *mesh,
                   *c1 = &corridor_verts[0].c2, *d1 = &corridor_verts[0].d2;
         fm_vec3_t *a2 = &corridor_verts[1].a2, *b2 = &corridor_verts[1].b2,
                   *c2 = &corridor_verts[1].c2, *d2 = &corridor_verts[1].d2;
-        add_quad(mesh, a1, b1, a2, b2);
-        add_quad(mesh, b1, c1, d2, a2);
-        add_quad(mesh, c1, d1, c2, d2);
-        add_quad(mesh, d1, a1, b2, c2);
+        add_quad(mesh, a1, b1, a2, b2, (float[4][2]){0});
+        add_quad(mesh, b1, c1, d2, a2, (float[4][2]){0});
+        add_quad(mesh, c1, d1, c2, d2, (float[4][2]){0});
+        add_quad(mesh, d1, a1, b2, c2, (float[4][2]){0});
     }
 }
 
 struct primitive *generate_tower_geometry(struct tower *tower, float scale) {
-    struct geom_mesh *mesh = malloc_mesh(16, 16, false);
+    struct geom_mesh *mesh = malloc_mesh(16, 16, true);
 
     // generate "basement" (-1) floor geometry
     // so that towers don't look like they float above ground
@@ -379,7 +404,7 @@ struct primitive *generate_tower_geometry(struct tower *tower, float scale) {
         generate_tower_geometry_floor(mesh, tower->segments_per_floor, i,
                                       tower->floors[i].corridor);
     }
-    struct primitive *primitive = geom_mesh_to_primitive(mesh, scale);
+    struct primitive *primitive = geom_mesh_to_primitive_textured(mesh, scale);
     free_mesh(mesh);
     return primitive;
 }

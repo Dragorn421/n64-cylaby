@@ -44,6 +44,10 @@ struct generate_flower_texture_res {
     int tlut_count;
 };
 bool generate_flower_texture(struct generate_flower_texture_res *res);
+struct generate_brick_texture_res {
+    surface_t tex;
+};
+bool generate_brick_texture(struct generate_brick_texture_res *res, int w, int h);
 
 // texture_utils.c
 void tex_normalize_contrast(float *out, const float *in, int w, int h);
