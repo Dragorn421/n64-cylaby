@@ -4,12 +4,15 @@ This is Nintendo 64 homebrew built using libdragon.
 
 ![Screenshot](media/screenshot.png)
 
+![Screenshot 2](media/screenshot2.png)
+
 ## Features
 
 - uses libdragon's magma
 - Suzanne
 - random maze generation
 - runtime geometry generation
+- runtime texture generation
 
 The random seed used to generate the current maze is drawn top-left.
 
