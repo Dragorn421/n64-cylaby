@@ -939,7 +939,7 @@ int main(void) {
         rdpq_clear((color_t){
             100,
             200,
-            80 + 20 * fm_cosf(t * 2 * FM_PI / 5000),
+            80 + 20 * cosf(t * 2 * FM_PI / 5000),
             255,
         });
         rdpq_clear_z(ZBUF_MAX);
@@ -1005,29 +1005,6 @@ int main(void) {
             mg_uniform_load(u_matrices, ud_matrices);
 
             rspq_block_run(suzanne_block);
-        }
-
-        for (int i = 0; i < ARRAY_COUNT(towers); i++) {
-            if (towers[i].tower == NULL) {
-                continue;
-            }
-            // Draw the tower walls
-            mg_set_culling(
-                &(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
-            rdpq_set_prim_color((color_t){50, 50, 200, 255});
-            {
-                fm_mat4_t mat_model;
-                fm_mat4_identity(&mat_model);
-                fm_mat4_translate(&mat_model, &towers[i].pos);
-                mgfx_matrices_t *ud_matrices = build_matrices(
-                    gfx_ctx, &mat_projection, &mat_view, &mat_model);
-
-                mg_uniform_load(u_matrices, ud_matrices);
-
-                add_used_primitive(gfx_ctx, towers[i].tower_walls_primitive);
-                add_used_block(gfx_ctx, towers[i].tower_walls_block);
-                rspq_block_run(towers[i].tower_walls_block);
-            }
         }
 
         mg_pipeline_bind(textured_pipeline);
@@ -1142,6 +1119,52 @@ int main(void) {
             rdpq_tex_upload(TILE0, &flowers[i].flower_tex_res.tex,
                             &(rdpq_texparms_t){});
             rspq_block_run(flower_block);
+        }
+
+        mg_pipeline_bind(pipeline);
+
+        mg_set_geometry_flags(MG_GEOMETRY_FLAGS_SHADE_ENABLED |
+                              MG_GEOMETRY_FLAGS_Z_ENABLED);
+
+        mg_uniform_load(u_fog, &ud_fog);
+        mg_uniform_load(u_lighting, &ud_lighting);
+
+        mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
+        rdpq_set_prim_color((color_t){
+            200,
+            50,
+            200,
+            140 + 5 * cosf(t * 2 * FM_PI / 500) +
+                20 * cosf(t * 2 * FM_PI / 2000) +
+                40 * cosf(t * 2 * FM_PI / 10000),
+        });
+        rdpq_mode_begin();
+        rdpq_set_mode_standard();
+        rdpq_mode_antialias(AA_STANDARD);
+        rdpq_mode_dithering(DITHER_SQUARE_SQUARE);
+        rdpq_mode_zbuf(true, false);
+        rdpq_mode_combiner(
+            RDPQ_COMBINER1((PRIM, 0, SHADE, 0), (0, 0, 0, PRIM)));
+        rdpq_mode_blender(RDPQ_BLENDER_MULTIPLY);
+        rdpq_mode_end();
+        for (int i = 0; i < ARRAY_COUNT(towers); i++) {
+            if (towers[i].tower == NULL) {
+                continue;
+            }
+            // Draw the tower walls
+            {
+                fm_mat4_t mat_model;
+                fm_mat4_identity(&mat_model);
+                fm_mat4_translate(&mat_model, &towers[i].pos);
+                mgfx_matrices_t *ud_matrices = build_matrices(
+                    gfx_ctx, &mat_projection, &mat_view, &mat_model);
+
+                mg_uniform_load(u_matrices, ud_matrices);
+
+                add_used_primitive(gfx_ctx, towers[i].tower_walls_primitive);
+                add_used_block(gfx_ctx, towers[i].tower_walls_block);
+                rspq_block_run(towers[i].tower_walls_block);
+            }
         }
 
         if (is_climbing_tower) {
