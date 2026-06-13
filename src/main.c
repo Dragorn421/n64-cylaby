@@ -221,8 +221,8 @@ int main(void) {
     data_cache_writeback_invalidate_all();
 
     fm_mat4_t mat_projection;
-#define Z_NEAR 10.0f
-#define Z_FAR 1000.0f
+#define Z_NEAR 30.0f
+#define Z_FAR 2000.0f
     mg_mat4_perspective(&mat_projection, FM_DEG2RAD(60),
                         (float)display_get_width() / display_get_height(),
                         Z_NEAR, Z_FAR);
