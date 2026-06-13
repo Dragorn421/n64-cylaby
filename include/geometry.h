@@ -9,6 +9,7 @@
 #include "tower.h"
 
 void geom_mesh_free_primitive(struct primitive *primitive);
+void geom_mesh_free_primitive_voidp(void *primitive);
 
 struct primitive *generate_tower_geometry(struct tower *tower, float scale);
 struct primitive *generate_tower_walls_geometry(struct tower *tower,

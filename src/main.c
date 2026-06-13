@@ -43,17 +43,6 @@ struct GfxCtx {
      */
     mgfx_matrices_t ud_mat_buf[40];
     int i_ud_mat_buf;
-    /**
-     * This buffer keeps track of the (dynamically allocated) primitives used by
-     * this context's frame, for the purpose of not freeing them while they're
-     * in use.
-     * The amount of valid entries (or equivalently the next free index) is
-     * stored in n_used_primitives.
-     */
-    struct primitive *used_primitives[6];
-    int n_used_primitives;
-    rspq_block_t *used_blocks[6];
-    int n_used_blocks;
 };
 
 /**
@@ -97,20 +86,6 @@ mgfx_matrices_t *build_matrices(struct GfxCtx *gfx_ctx,
     return ud_matrices;
 }
 
-/**
- * Add a primitive to the list of the frame's used primitives.
- * This function asserts if there is no more space in the buffer.
- */
-void add_used_primitive(struct GfxCtx *gfx_ctx, struct primitive *primitive) {
-    assert(gfx_ctx->n_used_primitives < ARRAY_COUNT(gfx_ctx->used_primitives));
-    gfx_ctx->used_primitives[gfx_ctx->n_used_primitives++] = primitive;
-}
-
-void add_used_block(struct GfxCtx *gfx_ctx, rspq_block_t *block) {
-    assert(gfx_ctx->n_used_blocks < ARRAY_COUNT(gfx_ctx->used_blocks));
-    gfx_ctx->used_blocks[gfx_ctx->n_used_blocks++] = block;
-}
-
 void draw_primitive(struct primitive *primitive) {
     mg_bind_vertex_buffer(primitive->vertices);
     mg_draw_indexed(
@@ -121,135 +96,7 @@ void draw_primitive(struct primitive *primitive) {
         primitive->indices, primitive->index_count, 0);
 }
 
-/**
- * This "defered primitives free" mechanism tracks which (dynamically allocated)
- * primitives should be freed, and frees them when no frame needs them (when no
- * GfxCtx references them anymore).
- */
-struct defered_primitives_free_ctx {
-    struct {
-        struct primitive *primitive;
-        void (*free_func)(struct primitive *);
-    } primitives_to_free[6];
-    bool has_primitives_to_free;
-};
-
-void defered_primitives_free_init_ctx(struct defered_primitives_free_ctx *ctx) {
-    for (int i = 0; i < ARRAY_COUNT(ctx->primitives_to_free); i++) {
-        ctx->primitives_to_free[i].primitive = NULL;
-    }
-    ctx->has_primitives_to_free = false;
-}
-
-/**
- * Add a primitive to be freed once it's no longer in use.
- */
-void defered_primitives_free_add(struct defered_primitives_free_ctx *ctx,
-                                 struct primitive *primitive,
-                                 void (*free_func)(struct primitive *)) {
-    bool is_full = true;
-    for (int i = 0; i < ARRAY_COUNT(ctx->primitives_to_free); i++) {
-        if (ctx->primitives_to_free[i].primitive == NULL) {
-            ctx->primitives_to_free[i].primitive = primitive;
-            ctx->primitives_to_free[i].free_func = free_func;
-            is_full = false;
-            break;
-        }
-    }
-    assert(!is_full);
-    ctx->has_primitives_to_free = true;
-}
-
-/**
- * Perform the free operations if possible.
- */
-void defered_primitives_free_free(struct defered_primitives_free_ctx *ctx,
-                                  struct GfxCtx *gfx_ctx_buf, int n_gfx_ctx) {
-    if (!ctx->has_primitives_to_free) {
-        return;
-    }
-    bool all_freed = true;
-    for (int i = 0; i < ARRAY_COUNT(ctx->primitives_to_free); i++) {
-        if (ctx->primitives_to_free[i].primitive != NULL) {
-            bool is_primitive_used = false;
-            for (int j = 0; j < n_gfx_ctx; j++) {
-                struct GfxCtx *gfx_ctx = &gfx_ctx_buf[j];
-                for (int k = 0; k < gfx_ctx->n_used_primitives; k++) {
-                    if (gfx_ctx->used_primitives[k] ==
-                        ctx->primitives_to_free[i].primitive) {
-                        is_primitive_used = true;
-                    }
-                }
-            }
-            if (!is_primitive_used) {
-                ctx->primitives_to_free[i].free_func(
-                    ctx->primitives_to_free[i].primitive);
-                ctx->primitives_to_free[i].primitive = NULL;
-            } else {
-                all_freed = false;
-            }
-        }
-    }
-    ctx->has_primitives_to_free = !all_freed;
-}
-
-// copypaste of the defered_primitives_free system for blocks.
-struct defered_blocks_free_ctx {
-    struct {
-        rspq_block_t *block;
-    } blocks_to_free[6];
-    bool has_blocks_to_free;
-};
-
-void defered_blocks_free_init_ctx(struct defered_blocks_free_ctx *ctx) {
-    for (int i = 0; i < ARRAY_COUNT(ctx->blocks_to_free); i++) {
-        ctx->blocks_to_free[i].block = NULL;
-    }
-    ctx->has_blocks_to_free = false;
-}
-
-void defered_blocks_free_add(struct defered_blocks_free_ctx *ctx,
-                             rspq_block_t *block) {
-    bool is_full = true;
-    for (int i = 0; i < ARRAY_COUNT(ctx->blocks_to_free); i++) {
-        if (ctx->blocks_to_free[i].block == NULL) {
-            ctx->blocks_to_free[i].block = block;
-            is_full = false;
-            break;
-        }
-    }
-    assert(!is_full);
-    ctx->has_blocks_to_free = true;
-}
-
-void defered_blocks_free_free(struct defered_blocks_free_ctx *ctx,
-                              struct GfxCtx *gfx_ctx_buf, int n_gfx_ctx) {
-    if (!ctx->has_blocks_to_free) {
-        return;
-    }
-    bool all_freed = true;
-    for (int i = 0; i < ARRAY_COUNT(ctx->blocks_to_free); i++) {
-        if (ctx->blocks_to_free[i].block != NULL) {
-            bool is_block_used = false;
-            for (int j = 0; j < n_gfx_ctx; j++) {
-                struct GfxCtx *gfx_ctx = &gfx_ctx_buf[j];
-                for (int k = 0; k < gfx_ctx->n_used_blocks; k++) {
-                    if (gfx_ctx->used_blocks[k] ==
-                        ctx->blocks_to_free[i].block) {
-                        is_block_used = true;
-                    }
-                }
-            }
-            if (!is_block_used) {
-                rspq_block_free(ctx->blocks_to_free[i].block);
-                ctx->blocks_to_free[i].block = NULL;
-            } else {
-                all_freed = false;
-            }
-        }
-    }
-    ctx->has_blocks_to_free = !all_freed;
-}
+void rspq_block_free_voidp(void *block) { rspq_block_free(block); }
 
 float my_lerp_angle_maxed(float a, float b, float t, float max_step) {
     float diff = fmodf((b - a), FM_PI * 2);
@@ -401,12 +248,6 @@ int main(void) {
     float cam_switch_timer = 0.0f, cam_switch_timer_ini = 1.0f;
     fm_vec3_t cam_eye, cam_target, cam_up;
 
-    struct defered_primitives_free_ctx defered_primitives_free_ctx;
-    defered_primitives_free_init_ctx(&defered_primitives_free_ctx);
-
-    struct defered_blocks_free_ctx defered_blocks_free_ctx;
-    defered_blocks_free_init_ctx(&defered_blocks_free_ctx);
-
     struct {
         unsigned int seed;
         struct tower *tower;
@@ -523,8 +364,6 @@ int main(void) {
         i_gfx_ctx++;
         i_gfx_ctx %= display_get_num_buffers();
         gfx_ctx->i_ud_mat_buf = 0;
-        gfx_ctx->n_used_primitives = 0;
-        gfx_ctx->n_used_blocks = 0;
 
         for (int i = 0; i < ARRAY_COUNT(towers); i++) {
             if (!towers[i].rebuild_tower) {
@@ -535,29 +374,27 @@ int main(void) {
                 towers[i].tower = NULL;
             }
             if (towers[i].tower_primitive != NULL) {
-                defered_primitives_free_add(&defered_primitives_free_ctx,
-                                            towers[i].tower_primitive,
-                                            geom_mesh_free_primitive);
+                rspq_call_deferred(geom_mesh_free_primitive_voidp,
+                                   towers[i].tower_primitive);
                 towers[i].tower_primitive = NULL;
             }
             if (towers[i].tower_walls_primitive != NULL) {
-                defered_primitives_free_add(&defered_primitives_free_ctx,
-                                            towers[i].tower_walls_primitive,
-                                            geom_mesh_free_primitive);
+                rspq_call_deferred(geom_mesh_free_primitive_voidp,
+                                   towers[i].tower_walls_primitive);
                 towers[i].tower_walls_primitive = NULL;
             }
             if (towers[i].tower_block != NULL) {
-                defered_blocks_free_add(&defered_blocks_free_ctx,
-                                        towers[i].tower_block);
+                rspq_call_deferred(rspq_block_free_voidp,
+                                   towers[i].tower_block);
                 towers[i].tower_block = NULL;
             }
             if (towers[i].tower_walls_block != NULL) {
-                defered_blocks_free_add(&defered_blocks_free_ctx,
-                                        towers[i].tower_walls_block);
+                rspq_call_deferred(rspq_block_free_voidp,
+                                   towers[i].tower_walls_block);
                 towers[i].tower_walls_block = NULL;
             }
             if (towers[i].tex.tex.buffer != NULL) {
-                free(towers[i].tex.tex.buffer);
+                rdpq_call_deferred(free, towers[i].tex.tex.buffer);
                 towers[i].tex.tex.buffer = NULL;
             }
 
@@ -1039,8 +876,6 @@ int main(void) {
 
                 mg_uniform_load(u_matrices, ud_matrices);
 
-                add_used_primitive(gfx_ctx, towers[i].tower_primitive);
-                add_used_block(gfx_ctx, towers[i].tower_block);
                 rdpq_tex_upload(TILE0, &towers[i].tex.tex,
                                 &(rdpq_texparms_t){
                                     .s.repeats = REPEAT_INFINITE,
@@ -1161,8 +996,6 @@ int main(void) {
 
                 mg_uniform_load(u_matrices, ud_matrices);
 
-                add_used_primitive(gfx_ctx, towers[i].tower_walls_primitive);
-                add_used_block(gfx_ctx, towers[i].tower_walls_block);
                 rspq_block_run(towers[i].tower_walls_block);
             }
         }
@@ -1175,10 +1008,5 @@ int main(void) {
         }
 
         rdpq_detach_show();
-
-        defered_primitives_free_free(&defered_primitives_free_ctx, gfx_ctx_buf,
-                                     display_get_num_buffers());
-        defered_blocks_free_free(&defered_blocks_free_ctx, gfx_ctx_buf,
-                                 display_get_num_buffers());
     }
 }

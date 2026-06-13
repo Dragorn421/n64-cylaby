@@ -288,6 +288,10 @@ void geom_mesh_free_primitive(struct primitive *primitive) {
     free(primitive);
 }
 
+void geom_mesh_free_primitive_voidp(void *primitive) {
+    geom_mesh_free_primitive(primitive);
+}
+
 struct polycol_mesh *geom_mesh_to_polycol_mesh(struct geom_mesh *mesh,
                                                float scale) {
     int n_triangles = 0;
