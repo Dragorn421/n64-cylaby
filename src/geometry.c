@@ -610,3 +610,43 @@ struct primitive *generate_flower_geometry(float h) {
     free_mesh(mesh);
     return primitive;
 }
+
+void generate_thread_geometry_segment(struct geom_mesh *mesh, fm_vec3_t *pos1,
+                                      fm_vec3_t *pos2, float thickness) {
+    fm_vec3_t dir;
+    fm_vec3_sub(&dir, pos1, pos2);
+    fm_vec3_t ortho_dir1, ortho_dir2;
+    // Compute two candidate orthogonal directions
+    fm_vec3_cross(&ortho_dir1, &dir, &(fm_vec3_t){{1, 0, 0}});
+    fm_vec3_cross(&ortho_dir2, &dir, &(fm_vec3_t){{0, 1, 0}});
+    // Keep the one with highest magnitude
+    if (fm_vec3_len2(&ortho_dir2) > fm_vec3_len2(&ortho_dir1)) {
+        ortho_dir1 = ortho_dir2;
+    }
+    fm_vec3_cross(&ortho_dir2, &dir, &ortho_dir1);
+    fm_vec3_norm(&ortho_dir1, &ortho_dir1);
+    fm_vec3_norm(&ortho_dir2, &ortho_dir2);
+    fm_vec3_scale(&ortho_dir1, &ortho_dir1, thickness / 2.0f);
+    fm_vec3_scale(&ortho_dir2, &ortho_dir2, thickness / 2.0f);
+    fm_vec3_t *ortho_dirs[2] = {&ortho_dir1, &ortho_dir2};
+    for (int i = 0; i < 2; i++) {
+        fm_vec3_t a, b, c, d;
+        fm_vec3_add(&a, pos1, ortho_dirs[i]);
+        fm_vec3_sub(&b, pos1, ortho_dirs[i]);
+        fm_vec3_sub(&c, pos2, ortho_dirs[i]);
+        fm_vec3_add(&d, pos2, ortho_dirs[i]);
+        add_quad(mesh, &a, &b, &c, &d, NULL);
+    }
+}
+
+struct primitive *generate_thread_geometry(fm_vec3_t *positions,
+                                           int n_positions, float thickness) {
+    struct geom_mesh *mesh = malloc_mesh(16, 16, false);
+    for (int i = 0; i < n_positions - 1; i++) {
+        generate_thread_geometry_segment(mesh, &positions[i], &positions[i + 1],
+                                         thickness);
+    }
+    struct primitive *primitive = geom_mesh_to_primitive(mesh, 1.0f);
+    free_mesh(mesh);
+    return primitive;
+}

@@ -41,7 +41,7 @@ struct GfxCtx {
      * This buffer holds matrices uniforms generated every frame.
      * The next free index in the buffer is stored in i_ud_mat_buf.
      */
-    mgfx_matrices_t ud_mat_buf[40];
+    mgfx_matrices_t ud_mat_buf[50];
     int i_ud_mat_buf;
 };
 
@@ -258,12 +258,28 @@ int main(void) {
         struct generate_brick_texture_res tex;
         bool rebuild_tower;
         fm_vec3_t pos;
+        struct {
+            struct {
+                int floor;
+                int segment;
+            } *positions;
+            int max_positions;
+            int n_positions;
+            struct primitive *thread_primitive;
+            rspq_block_t *thread_block;
+        } ariadnes_thread;
     } towers[3] = {0};
     towers[0].pos = (fm_vec3_t){{300, 0, 0}};
     towers[1].pos = (fm_vec3_t){{-300, 0, 0}};
     towers[2].pos = (fm_vec3_t){{0, 300, 0}};
     for (int i = 0; i < ARRAY_COUNT(towers); i++) {
         towers[i].rebuild_tower = true;
+
+        towers[i].ariadnes_thread.max_positions = 16;
+        towers[i].ariadnes_thread.positions =
+            malloc(sizeof(*towers[i].ariadnes_thread.positions) *
+                   towers[i].ariadnes_thread.max_positions);
+        towers[i].ariadnes_thread.n_positions = 0;
     }
     int i_cur_tower = 0;
 
@@ -397,6 +413,16 @@ int main(void) {
                 rdpq_call_deferred(free, towers[i].tex.tex.buffer);
                 towers[i].tex.tex.buffer = NULL;
             }
+            if (towers[i].ariadnes_thread.thread_primitive != NULL) {
+                rspq_call_deferred(geom_mesh_free_primitive_voidp,
+                                   towers[i].ariadnes_thread.thread_primitive);
+                towers[i].ariadnes_thread.thread_primitive = NULL;
+            }
+            if (towers[i].ariadnes_thread.thread_block != NULL) {
+                rspq_call_deferred(rspq_block_free_voidp,
+                                   towers[i].ariadnes_thread.thread_block);
+                towers[i].ariadnes_thread.thread_block = NULL;
+            }
 
             // malloc the tower data, with unset walls
             towers[i].tower =
@@ -441,6 +467,8 @@ int main(void) {
             rspq_block_begin();
             draw_primitive(towers[i].tower_walls_primitive);
             towers[i].tower_walls_block = rspq_block_end();
+
+            towers[i].ariadnes_thread.n_positions = 0;
 
             towers[i].rebuild_tower = false;
         }
@@ -583,6 +611,69 @@ int main(void) {
                         }
                     }
                 }
+                if (towers[i_cur_tower].ariadnes_thread.n_positions == 0) {
+                    towers[i_cur_tower].ariadnes_thread.n_positions = 1;
+                } else if (towers[i_cur_tower].ariadnes_thread.n_positions >=
+                               2 &&
+                           towers[i_cur_tower]
+                                   .ariadnes_thread
+                                   .positions[towers[i_cur_tower]
+                                                  .ariadnes_thread.n_positions -
+                                              2]
+                                   .floor == floor &&
+                           towers[i_cur_tower]
+                                   .ariadnes_thread
+                                   .positions[towers[i_cur_tower]
+                                                  .ariadnes_thread.n_positions -
+                                              2]
+                                   .segment == segment) {
+                    towers[i_cur_tower].ariadnes_thread.n_positions -= 1;
+                } else if (!(towers[i_cur_tower]
+                                     .ariadnes_thread
+                                     .positions[towers[i_cur_tower]
+                                                    .ariadnes_thread
+                                                    .n_positions -
+                                                1]
+                                     .floor == floor &&
+                             towers[i_cur_tower]
+                                     .ariadnes_thread
+                                     .positions[towers[i_cur_tower]
+                                                    .ariadnes_thread
+                                                    .n_positions -
+                                                1]
+                                     .segment == segment)) {
+                    towers[i_cur_tower].ariadnes_thread.n_positions += 1;
+                }
+                if (towers[i_cur_tower].ariadnes_thread.n_positions >
+                    towers[i_cur_tower].ariadnes_thread.max_positions) {
+                    int new_max_positions =
+                        towers[i_cur_tower].ariadnes_thread.max_positions * 2;
+                    void *tmp = realloc(
+                        towers[i_cur_tower].ariadnes_thread.positions,
+                        sizeof(
+                            towers[i_cur_tower].ariadnes_thread.positions[0]) *
+                            new_max_positions);
+                    if (tmp == NULL) {
+                        towers[i_cur_tower].ariadnes_thread.n_positions =
+                            towers[i_cur_tower].ariadnes_thread.max_positions;
+                    } else {
+                        towers[i_cur_tower].ariadnes_thread.positions = tmp;
+                        towers[i_cur_tower].ariadnes_thread.max_positions =
+                            new_max_positions;
+                    }
+                }
+                assert(towers[i_cur_tower].ariadnes_thread.n_positions <=
+                       towers[i_cur_tower].ariadnes_thread.max_positions);
+                towers[i_cur_tower]
+                    .ariadnes_thread
+                    .positions[towers[i_cur_tower].ariadnes_thread.n_positions -
+                               1]
+                    .floor = floor;
+                towers[i_cur_tower]
+                    .ariadnes_thread
+                    .positions[towers[i_cur_tower].ariadnes_thread.n_positions -
+                               1]
+                    .segment = segment;
             }
             if (abs(inputs.stick_y) < 10) {
                 float target_suzanne_height =
@@ -700,6 +791,20 @@ int main(void) {
                 is_climbing_tower = true;
                 cam_switch_timer = cam_switch_timer_ini = 1.0f;
                 i_cur_tower = i_closest_tower;
+                towers[i_cur_tower].ariadnes_thread.n_positions = 0;
+                if (towers[i_cur_tower].ariadnes_thread.thread_primitive !=
+                    NULL) {
+                    rspq_call_deferred(
+                        geom_mesh_free_primitive_voidp,
+                        towers[i_cur_tower].ariadnes_thread.thread_primitive);
+                    towers[i_cur_tower].ariadnes_thread.thread_primitive = NULL;
+                }
+                if (towers[i_cur_tower].ariadnes_thread.thread_block != NULL) {
+                    rspq_call_deferred(
+                        rspq_block_free_voidp,
+                        towers[i_cur_tower].ariadnes_thread.thread_block);
+                    towers[i_cur_tower].ariadnes_thread.thread_block = NULL;
+                }
                 memset(&tower_climb_ctx, 0, sizeof(tower_climb_ctx));
                 if (closest_tower_dist > FM_EPSILON) {
                     fm_vec2_t diff;
@@ -965,6 +1070,104 @@ int main(void) {
         mg_uniform_load(u_lighting, &ud_lighting);
 
         mg_set_culling(&(mg_culling_parms_t){.cull_mode = MG_CULL_MODE_NONE});
+
+        rdpq_mode_begin();
+        rdpq_set_mode_standard();
+        rdpq_mode_antialias(AA_STANDARD);
+        rdpq_mode_dithering(DITHER_SQUARE_SQUARE);
+        rdpq_mode_zbuf(true, true);
+        rdpq_mode_combiner(RDPQ_COMBINER_FLAT);
+        rdpq_mode_end();
+        rdpq_set_prim_color((color_t){168, 129, 71, 255});
+        mg_draw_begin();
+        for (int i_tower = 0; i_tower < ARRAY_COUNT(towers); i_tower++) {
+            bool is_tower_being_climbed =
+                is_climbing_tower && i_tower == i_cur_tower;
+            bool use_block = !is_tower_being_climbed;
+            bool record_block =
+                towers[i_tower].ariadnes_thread.thread_block == NULL &&
+                use_block;
+            bool generate_geometry = record_block || !use_block;
+            if (generate_geometry) {
+                int n_positions = towers[i_tower].ariadnes_thread.n_positions;
+                if (is_tower_being_climbed) {
+                    n_positions += 1;
+                }
+                fm_vec3_t *positions = malloc(sizeof(fm_vec3_t) * n_positions);
+                if (is_tower_being_climbed) {
+                    fm_vec3_t pos;
+                    fm_sincosf(tower_climb_ctx.suzanne_angle, &pos.y, &pos.x);
+                    pos.x *= (TOWER_RADIUS + 10.0f);
+                    pos.y *= (TOWER_RADIUS + 10.0f);
+                    pos.z =
+                        (tower_climb_ctx.suzanne_height + 0.5f) * TOWER_RADIUS;
+                    fm_vec3_add(&pos, &pos, &towers[i_tower].pos);
+                    positions[n_positions - 1] = pos;
+                }
+                for (int i = 0; i < towers[i_tower].ariadnes_thread.n_positions;
+                     i++) {
+                    fm_vec3_t pos;
+
+                    fm_sincosf(
+                        towers[i_tower].ariadnes_thread.positions[i].segment *
+                            2 * FM_PI /
+                            towers[i_tower].tower->segments_per_floor,
+                        &pos.y, &pos.x);
+                    pos.x *= (TOWER_RADIUS + 10.0f);
+                    pos.y *= (TOWER_RADIUS + 10.0f);
+                    pos.z =
+                        (towers[i_tower].ariadnes_thread.positions[i].floor +
+                         0.5f) *
+                        TOWER_RADIUS;
+
+                    fm_vec3_add(&pos, &pos, &towers[i_tower].pos);
+                    positions[i] = pos;
+                }
+                if (is_tower_being_climbed && n_positions >= 3) {
+                    fm_vec3_t *prev_pos = &positions[n_positions - 3];
+                    fm_vec3_t *pos = &positions[n_positions - 2];
+                    fm_vec3_t *suzanne_pos = &positions[n_positions - 1];
+                    fm_vec3_t prev_to_pos, prev_to_suzanne;
+                    fm_vec3_sub(&prev_to_pos, pos, prev_pos);
+                    fm_vec3_sub(&prev_to_suzanne, suzanne_pos, prev_pos);
+                    if (fm_vec3_len2(&prev_to_suzanne) <
+                        fm_vec3_len2(&prev_to_pos)) {
+                        *pos = *suzanne_pos;
+                        n_positions -= 1;
+                    }
+                }
+                assert(towers[i_tower].ariadnes_thread.thread_primitive ==
+                       NULL);
+                towers[i_tower].ariadnes_thread.thread_primitive =
+                    generate_thread_geometry(positions, n_positions, 4.0f);
+                free(positions);
+                data_cache_writeback_invalidate_all();
+            }
+
+            fm_mat4_t mat_model;
+            fm_mat4_identity(&mat_model);
+            mgfx_matrices_t *ud_matrices =
+                build_matrices(gfx_ctx, &mat_projection, &mat_view, &mat_model);
+            mg_uniform_load(u_matrices, ud_matrices);
+            if (record_block) {
+                rspq_block_begin();
+            }
+            draw_primitive(towers[i_tower].ariadnes_thread.thread_primitive);
+            if (record_block) {
+                assert(towers[i_tower].ariadnes_thread.thread_block == NULL);
+                towers[i_tower].ariadnes_thread.thread_block = rspq_block_end();
+            }
+            if (use_block) {
+                assert(towers[i_tower].ariadnes_thread.thread_block != NULL);
+                rspq_block_run(towers[i_tower].ariadnes_thread.thread_block);
+            } else {
+                rspq_call_deferred(
+                    geom_mesh_free_primitive_voidp,
+                    towers[i_tower].ariadnes_thread.thread_primitive);
+                towers[i_tower].ariadnes_thread.thread_primitive = NULL;
+            }
+        }
+
         rdpq_set_prim_color((color_t){
             200,
             50,

@@ -26,4 +26,7 @@ generate_ground_geometry(fm_vec2_t *from, fm_vec2_t *to, float z,
 
 struct primitive *generate_flower_geometry(float h);
 
+struct primitive *generate_thread_geometry(fm_vec3_t *positions,
+                                           int n_positions, float thickness);
+
 #endif
