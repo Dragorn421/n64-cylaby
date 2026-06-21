@@ -19,28 +19,38 @@ bool generate_ground_texture(struct generate_ground_texture_res *res) {
         {0.87058824, 0.77647059, 0.45098039},
         {0.61176471, 0.51764706, 0.29019608},
     };
-    float im_color_facs[4][32][32];
+    float *im_color_facs = malloc(4 * 32 * 32 * sizeof(float));
     float kernel_color_fac[5][5];
     gaussian_kernel(kernel_color_fac[0], 5, 5, 1.5f);
+    float *im_color_fac = malloc(32 * 32 * sizeof(float));
+    if (im_color_facs == NULL || im_color_fac == NULL) {
+        free(im_color_facs);
+        free(im_color_fac);
+        return false;
+    }
     for (int k = 0; k < 4; k++) {
-        float im_color_fac[32][32];
         for (int y = 0; y < 32; y++) {
             for (int x = 0; x < 32; x++) {
-                im_color_fac[y][x] = (rand() % 256) / 255.0f;
+                im_color_fac[y * 32 + x] = (rand() % 256) / 255.0f;
             }
         }
-        apply_kernel_wrap(im_color_facs[k][0], im_color_fac[0], 32, 32,
+        apply_kernel_wrap(&im_color_facs[k * 32 * 32], im_color_fac, 32, 32,
                           kernel_color_fac[0], 5, 5);
-        tex_normalize_contrast(im_color_facs[k][0], im_color_facs[k][0], 32,
-                               32);
+        tex_normalize_contrast(&im_color_facs[k * 32 * 32],
+                               &im_color_facs[k * 32 * 32], 32, 32);
     }
-    float im_color[32][32][3];
+    free(im_color_fac);
+    float (*im_color)[3] = malloc(32 * 32 * 3 * sizeof(float));
+    if (im_color == NULL) {
+        free(im_color_facs);
+        return false;
+    }
     for (int y = 0; y < 32; y++) {
         for (int x = 0; x < 32; x++) {
             float rgb_sum[3] = {0};
             float w_sum = 0;
             for (int k = 0; k < 4; k++) {
-                float w = im_color_facs[k][y][x];
+                float w = im_color_facs[k * 32 * 32 + y * 32 + x];
                 w = w * w * w * w;
                 for (int c = 0; c < 3; c++) {
                     rgb_sum[c] += colors[k][c] * w;
@@ -48,36 +58,47 @@ bool generate_ground_texture(struct generate_ground_texture_res *res) {
                 w_sum += w;
             }
             for (int c = 0; c < 3; c++) {
-                im_color[y][x][c] = rgb_sum[c] / w_sum;
+                im_color[y * 32 + x][c] = rgb_sum[c] / w_sum;
             }
         }
     }
-    float im_gray_noise[64][64];
+    free(im_color_facs);
+    float *im_gray_noise = malloc(64 * 64 * sizeof(float));
+    float *im_gray = malloc(64 * 64 * sizeof(float));
+    if (im_gray_noise == NULL || im_gray == NULL) {
+        free(im_color);
+        free(im_gray_noise);
+        free(im_gray);
+        return false;
+    }
     for (int y = 0; y < 64; y++) {
         for (int x = 0; x < 64; x++) {
-            im_gray_noise[y][x] = (rand() % 256) / 255.0f;
+            im_gray_noise[y * 64 + x] = (rand() % 256) / 255.0f;
         }
     }
-    float im_gray[64][64];
     float kernel_gray[5][5];
     gaussian_kernel(kernel_gray[0], 5, 5, 1.0f);
-    apply_kernel_wrap(im_gray[0], im_gray_noise[0], 64, 64, kernel_gray[0], 5,
-                      5);
-    tex_normalize_contrast(im_gray[0], im_gray[0], 64, 64);
+    apply_kernel_wrap(im_gray, im_gray_noise, 64, 64, kernel_gray[0], 5, 5);
+    free(im_gray_noise);
+    tex_normalize_contrast(im_gray, im_gray, 64, 64);
     for (int y = 0; y < 64; y++) {
         for (int x = 0; x < 64; x++) {
-            im_gray[y][x] = 0.5f + 0.5f * im_gray[y][x];
+            im_gray[y * 64 + x] = 0.5f + 0.5f * im_gray[y * 64 + x];
         }
     }
     void *im_color_rgba16 = malloc(32 * 32 * 2);
     void *im_gray_i4 = malloc(64 * 64 / 2);
     if (im_color_rgba16 == NULL || im_gray_i4 == NULL) {
+        free(im_color);
+        free(im_gray);
         free(im_color_rgba16);
         free(im_gray_i4);
         return false;
     }
-    tex_float_rgb_to_rgba16(im_color_rgba16, im_color[0], 32, 32);
-    tex_float_intensity_to_i4(im_gray_i4, im_gray[0], 64, 64);
+    tex_float_rgb_to_rgba16(im_color_rgba16, im_color, 32, 32);
+    free(im_color);
+    tex_float_intensity_to_i4(im_gray_i4, im_gray, 64, 64);
+    free(im_gray);
     res->multitex_color =
         surface_make_linear(im_color_rgba16, FMT_RGBA16, 32, 32);
     res->multitex_gray = surface_make_linear(im_gray_i4, FMT_I4, 64, 64);
@@ -109,27 +130,31 @@ void set_pixel_ci8(void *uarg, int x, int y) {
 }
 
 bool generate_flower_texture(struct generate_flower_texture_res *res) {
-    uint8_t im[85][48] = {0};
+    uint8_t *im = malloc(85 * 48 * sizeof(uint8_t));
+    if (im == NULL) {
+        return false;
+    }
+    memset(im, 0, 85 * 48 * sizeof(uint8_t));
     float palette[16][4];
     int palette_count = 0;
     memcpy(palette[palette_count++], (float[4]){0}, sizeof(float[4]));
-    const float width = 48, height = 85;
+    const int width = 48, height = 85;
 
-    float heart_radius_max = width / 4;
+    float heart_radius_max = width / 4.0f;
     float heart_radius = uniform(0.3f * heart_radius_max, heart_radius_max);
-    float petal_length_max = width / 2 - heart_radius;
+    float petal_length_max = width / 2.0f - heart_radius;
     float petal_length = uniform(0.3f * petal_length_max, petal_length_max);
     int n_petals_min =
         (int)(2 * FM_PI * heart_radius / (2 * petal_length) * 0.6f);
     int n_petals =
         (int)fm_roundf(uniform(MAX(3, n_petals_min), n_petals_min + 4));
-    float heart_x = width / 2;
+    float heart_x = width / 2.0f;
     float heart_y_min = heart_radius + petal_length;
     float heart_y_max = width - heart_y_min;
     float heart_y = uniform(heart_y_min, heart_y_max);
-    float stem_root_x = width / 2;
+    float stem_root_x = width / 2.0f;
     float stem_root_y = height;
-    float stem_width = uniform(width / 15, width / 6);
+    float stem_width = uniform(width / 15.0f, width / 6.0f);
 
     float stem_color[4] = {0.4f, 0.6f + 0.4f * randf(), 0.2f, 1.0f};
     float heart_color[4] = {uniform(0.85f, 1.0f), uniform(0.85f, 1.0f), 0,
@@ -147,7 +172,7 @@ bool generate_flower_texture(struct generate_flower_texture_res *res) {
     }
     petal_color[3] = 1.0f;
 
-    struct set_pixel_ci8_ctx set_pixel_ci8_ctx = {im[0], width, 0};
+    struct set_pixel_ci8_ctx set_pixel_ci8_ctx = {im, width, 0};
 
     set_pixel_ci8_ctx.value = palette_count;
     memcpy(palette[palette_count++], stem_color, sizeof(float[4]));
@@ -176,24 +201,33 @@ bool generate_flower_texture(struct generate_flower_texture_res *res) {
 
     void *tlut = malloc(palette_count * 2);
     if (tlut == NULL) {
+        free(im);
         return false;
     }
     tex_float_rgba_to_rgba16(tlut, palette, palette_count, 1);
-    uint8_t im_alphabled[85][48];
+    uint8_t *im_alphabled = malloc(85 * 48 * sizeof(uint8_t));
+    if (im_alphabled == NULL) {
+        free(im);
+        free(tlut);
+        return false;
+    }
     uint16_t tlut_alphabled[256];
     int tlut_count_alphabled;
-    alpha_bleeder(im[0], tlut, palette_count, width, height, im_alphabled[0],
+    alpha_bleeder(im, tlut, palette_count, width, height, im_alphabled,
                   tlut_alphabled, &tlut_count_alphabled);
 
+    free(im);
     free(tlut);
     void *im_ci4 = malloc(width * height / 2);
     void *tlut_alphabled_malloced = malloc(tlut_count_alphabled * 2);
     if (im_ci4 == NULL || tlut_alphabled_malloced == NULL) {
+        free(im_alphabled);
         free(im_ci4);
         free(tlut_alphabled_malloced);
         return false;
     }
-    tex_ci8_to_ci4(im_ci4, im_alphabled[0], width, height);
+    tex_ci8_to_ci4(im_ci4, im_alphabled, width, height);
+    free(im_alphabled);
     memcpy(tlut_alphabled_malloced, tlut_alphabled, tlut_count_alphabled * 2);
     res->tex = surface_make_linear(im_ci4, FMT_CI4, width, height);
     res->tlut = tlut_alphabled_malloced;
